@@ -76,7 +76,6 @@ async fn example(
 use alloy::{
     primitives::{Address, U256},
     providers::{DynProvider, Provider},
-};
 use kohaku_tornadocash::{merkle_tree::MerkleTree, Note, Pool, Relayer, Withdrawal};
 
 async fn example(

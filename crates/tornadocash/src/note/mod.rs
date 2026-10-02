@@ -8,8 +8,8 @@ use ruint::aliases::U256;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::crypto::pedersen::pedersen_hash;
 pub use crate::note::secrets::{Nullifier, Secret};
+use crate::{Pool, crypto::pedersen::pedersen_hash};
 
 mod secrets;
 
@@ -90,6 +90,16 @@ impl NoteString {
             symbol: symbol.into(),
             amount: amount.into(),
             chain_id,
+        }
+    }
+
+    #[must_use]
+    pub fn from_pool(note: Note, pool: Pool) -> Self {
+        Self {
+            note,
+            symbol: pool.symbol().to_string(),
+            amount: pool.amount().to_string(),
+            chain_id: pool.chain_id,
         }
     }
 }
