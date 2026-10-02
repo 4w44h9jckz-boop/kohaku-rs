@@ -1,17 +1,20 @@
 use alloy::{
-    primitives::Address,
-    providers::{Provider, ProviderBuilder, ext::AnvilApi},
-    rpc::types::anvil::ReorgOptions,
+    primitives::{Address, U256},
+    providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
 };
 use kohaku_fork_kit::pool::deploy_pool;
 use kohaku_kv_store::Store;
-use kohaku_tornadocash::{indexer::rpc::RpcSyncer, provider::TornadoProvider};
-use tracing::info;
+use kohaku_tornadocash::{
+    deposit::Deposit,
+    merkle_tree::{MerkleTree, MerkleTreeExt},
+    syncer::{Syncer, rpc::RpcSyncer},
+    withdrawal::Withdrawal,
+};
 
 #[tokio::test]
 #[ignore = "run with `cargo test --release -- --ignored`"]
-async fn test_provider() -> Result<(), anyhow::Error> {
+async fn test_deposit() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init()
@@ -20,134 +23,27 @@ async fn test_provider() -> Result<(), anyhow::Error> {
     let provider = ProviderBuilder::new().connect_anvil_with_wallet().erased();
     let pool = deploy_pool(provider.clone(), None).await?;
 
-    let syncer = RpcSyncer::new(provider.clone());
-    let tornado_provider = TornadoProvider::new(
-        Store::create(),
-        syncer.clone().into(),
-        syncer.clone().into(),
-        provider.clone(),
-    );
-
-    info!("Depositing into pool");
-    let deposit = tornado_provider.deposit(pool, &mut rand::rng()).await;
-    let note = deposit.note();
-    info!("Deposit: {deposit:?}");
-
-    info!("Syncing pool provider");
-    tornado_provider.sync().await?;
-
-    let receipt = provider
+    // Deposit a note
+    let deposit = Deposit::new(&pool, rand::random());
+    provider
         .send_transaction(deposit.into())
         .await?
-        .get_receipt()
-        .await?;
-    info!("Deposit tx receipt: {receipt:?}");
-
-    tornado_provider.sync().await?;
-
-    info!("Withdrawing from pool");
-    let recipient: Address = PrivateKeySigner::random().address();
-    let withdrawal = tornado_provider.withdraw(note, recipient);
-    info!("Withdraw call: {withdrawal:?}");
-
-    let receipt = provider
-        .send_transaction(withdrawal.into_transaction(&mut rand::rng()).await?)
-        .await?
-        .get_receipt()
-        .await?;
-    info!("Withdraw tx receipt: {receipt:?}");
-
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore = "run with `cargo test --release -- --ignored`"]
-async fn test_pool_provider_reorg_recovery() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .try_init()
-        .ok();
-
-    // Use `SimpleNonceManager` instead of the default `CachedNonceManager` so the cached
-    // nonce manager doesn't break after reorgs.
-    let provider = ProviderBuilder::new()
-        .disable_recommended_fillers()
-        .with_gas_estimation()
-        .fetch_chain_id()
-        .with_simple_nonce_management()
-        .connect_anvil_with_wallet()
-        .erased();
-    let pool = deploy_pool(provider.clone(), None).await?;
-
-    let syncer = RpcSyncer::new(provider.clone());
-    let tornado_provider = TornadoProvider::new(
-        Store::create(),
-        syncer.clone().into(),
-        syncer.clone().into(),
-        provider.clone(),
-    );
-
-    info!("Depositing note_a");
-    let deposit_a = tornado_provider.deposit(pool.clone(), &mut rand::rng()).await;
-    let note_a = deposit_a.note();
-    let receipt_a = provider
-        .send_transaction(deposit_a.into())
-        .await?
-        .get_receipt()
+        .watch()
         .await?;
 
-    info!("Syncing provider after note_a deposit");
-    tornado_provider.sync().await?;
-
-    info!("Reorging out note_a's deposit");
-    provider
-        .anvil_reorg(ReorgOptions {
-            depth: 1,
-            tx_block_pairs: Vec::new(),
-        })
-        .await?;
-    provider
-        .anvil_drop_transaction(receipt_a.transaction_hash)
-        .await?;
-
-    info!("Depositing note_b in its place");
-    let deposit_b = tornado_provider.deposit(pool, &mut rand::rng()).await;
-    let note_b = deposit_b.note();
-    provider
-        .send_transaction(deposit_b.into())
-        .await?
-        .get_receipt()
-        .await?;
-
-    info!("Syncing provider after reorg");
-    tornado_provider.sync().await?;
-
-    info!("Withdrawing note_b");
-    let recipient: Address = PrivateKeySigner::random().address();
-    let withdraw_call = tornado_provider.withdraw(note_b, recipient);
-    provider
-        .send_transaction(withdraw_call.into_transaction(&mut rand::rng()).await?)
-        .await?
-        .get_receipt()
-        .await?;
-
-    let withdraw_a = tornado_provider
-        .withdraw(note_a, recipient)
-        .into_transaction(&mut rand::rng())
-        .await;
+    // Assert recipient balance
+    let balance = provider.get_balance(pool.address).await?;
     assert!(
-        withdraw_a.is_err(),
-        "note_a's commitment should have been replaced by the reorg"
+        balance == U256::from(pool.amount_wei),
+        "Pool balance should be non-zero"
     );
 
     Ok(())
 }
 
-/// A `TornadoProvider` persists which pools it has seen, so a fresh instance over the same
-/// store picks a previously-deposited-into pool back up without needing to be told about it.
 #[tokio::test]
 #[ignore = "run with `cargo test --release -- --ignored`"]
-async fn test_known_pools_persist_across_restart() -> Result<(), anyhow::Error> {
+async fn test_withdraw() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init()
@@ -156,51 +52,40 @@ async fn test_known_pools_persist_across_restart() -> Result<(), anyhow::Error> 
     let provider = ProviderBuilder::new().connect_anvil_with_wallet().erased();
     let pool = deploy_pool(provider.clone(), None).await?;
 
-    let store = Store::create();
+    // Deposit a note
+    let deposit = Deposit::new(&pool, rand::random());
+    let note = deposit.note();
+    provider
+        .send_transaction(deposit.into())
+        .await?
+        .watch()
+        .await?;
+
+    // Construct a TornadoProvider
     let syncer = RpcSyncer::new(provider.clone());
 
-    info!("Depositing via the first TornadoProvider instance");
-    let note = {
-        let tornado_provider = TornadoProvider::new(
-            store.clone(),
-            syncer.clone().into(),
-            syncer.clone().into(),
-            provider.clone(),
-        );
+    // Sync a Merkle tree against the provider
+    let tree = MerkleTree::new(Store::create());
+    let snapshot = syncer.sync(&pool, ..).await?;
+    tree.splice_events(&snapshot.events).await?;
 
-        let deposit = tornado_provider.deposit(pool, &mut rand::rng()).await;
-        let note = deposit.note();
-        provider
-            .send_transaction(deposit.into())
-            .await?
-            .get_receipt()
-            .await?;
-        tornado_provider.sync().await?;
-
-        note
-    };
-
-    info!("Syncing and withdrawing via a fresh TornadoProvider over the same store");
-    let tornado_provider = TornadoProvider::new(
-        store,
-        syncer.clone().into(),
-        syncer.into(),
-        provider.clone(),
-    );
-    tornado_provider.sync().await?;
-
+    // Withdraw the note
     let recipient: Address = PrivateKeySigner::random().address();
-    let receipt = provider
-        .send_transaction(
-            tornado_provider
-                .withdraw(note, recipient)
-                .into_transaction(&mut rand::rng())
-                .await?,
-        )
+    let merkle_proof = tree.leaf_proof(note.commitment()).await?;
+    let withdrawal =
+        Withdrawal::new(&pool, note, recipient).prove(&merkle_proof, &mut rand::rng())?;
+    provider
+        .send_transaction(withdrawal.into())
         .await?
-        .get_receipt()
+        .watch()
         .await?;
-    info!("Withdraw tx receipt: {receipt:?}");
+
+    // Assert recipient balance
+    let balance = provider.get_balance(recipient).await?;
+    assert!(
+        balance == U256::from(pool.amount_wei),
+        "Recipient balance should be non-zero"
+    );
 
     Ok(())
 }

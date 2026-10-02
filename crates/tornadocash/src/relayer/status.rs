@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
 use alloy::primitives::{Address, U256};
+use ruint::uint;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    pool::{Asset, Pool},
-    relayer::RelayerError,
-};
+use crate::{asset::Asset, pool::Pool, relayer::RelayerError, withdrawal::Payer};
 
 /// Relayer status response.
+///
+/// See [tornado-relayer/src/contollers/status.js](https://github.com/tornado-dao/tornado-relayer/blob/52473197ea49fb70dab8fead01de52545801ca6b/src/contollers/status.js#L13)
+/// for the reference.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelayerStatus {
@@ -39,60 +40,60 @@ pub struct Health {
 
 impl RelayerStatus {
     /// Checks if the relayer supports the given pool.
+    #[must_use]
     pub fn supports(&self, pool: &Pool) -> bool {
         if pool.chain_id != self.net_id {
             return false;
         }
 
-        let Some(instance) = self.instances.get(&pool.symbol()) else {
+        let Some(instance) = self.instances.get(pool.symbol()) else {
             return false;
         };
 
-        for (amount, address) in &instance.instance_address {
-            if amount != &pool.amount() {
-                continue;
-            }
-            if address != &pool.address {
-                continue;
-            }
-            return true;
-        }
-
-        return false;
+        instance.instance_address.get(&pool.amount()) == Some(&pool.address)
     }
 
-    /// Calculates the fee for a transaction.
+    /// Quotes the fee for a withdrawal paid by the relayer.
     ///
     /// # Errors
     /// Returns an error if the relayer does not support the given pool.
-    pub fn fee(&self, pool: &Pool, gas_price: u128, refund: U256) -> Result<U256, RelayerError> {
+    pub fn quote(&self, pool: &Pool, gas_price: u128, refund: U256) -> Result<Payer, RelayerError> {
+        // Scale the fee percentage into a fixed-point integer.
+        const FEE_PRECISION: u64 = 1_000_000;
+        const WITHDRAWAL_GAS: U256 = uint!(500_000_U256);
+
         if !self.supports(pool) {
             return Err(RelayerError::UnsupportedPool(pool.clone()));
         }
 
-        // Scale the fee percentage into a fixed-point integer.
-        const FEE_PRECISION: u64 = 1_000_000;
-
+        #[expect(clippy::cast_sign_loss, clippy::cast_precision_loss)]
         let fee_scaled = (self.tornado_service_fee / 100.0 * FEE_PRECISION as f64).round() as u64;
         let fee_percent =
             (U256::from(pool.amount_wei) * U256::from(fee_scaled)) / U256::from(FEE_PRECISION);
-        let expense = U256::from(gas_price) * U256::from(500_000);
+        let expense = U256::from(gas_price) * WITHDRAWAL_GAS;
 
         // If the asset is native, the fee is `expense + fee_percent`
         if matches!(pool.asset, Asset::Native { .. }) {
-            return Ok(fee_percent + expense);
+            return Ok(Payer {
+                address: self.reward_account,
+                fee: expense + fee_percent,
+                refund,
+            });
         }
 
-        let Some(price) = self.eth_prices.get(&pool.symbol()) else {
+        let Some(price) = self.eth_prices.get(pool.symbol()).copied() else {
             return Err(RelayerError::UnsupportedPool(pool.clone()));
         };
 
         // If the asset is non-native, the fee is:
-        // `((expense + refund) * 10^decimals / price) + fee_percent`
-        Ok(
-            (expense + refund) * U256::from(10).pow(U256::from(pool.asset.decimals())) / *price
-                + fee_percent,
-        )
+        let fee = (expense + refund) * U256::from(10).pow(U256::from(pool.asset.decimals()))
+            / price
+            + fee_percent;
+        Ok(Payer {
+            address: self.reward_account,
+            fee,
+            refund,
+        })
     }
 }
 
@@ -108,10 +109,10 @@ mod tests {
 
         let status = RelayerStatus {
             instances: HashMap::from([(
-                pool.symbol(),
+                pool.symbol().to_string(),
                 Instance {
                     instance_address: HashMap::from([(pool.amount(), pool.address)]),
-                    symbol: pool.symbol(),
+                    symbol: pool.symbol().to_string(),
                     decimals: pool.asset.decimals(),
                 },
             )]),
@@ -140,12 +141,12 @@ mod tests {
 
         let status = RelayerStatus {
             tornado_service_fee: 1.0,
-            eth_prices: HashMap::from([(pool.symbol(), U256::from(pool.amount_wei))]),
+            eth_prices: HashMap::from([(pool.symbol().to_string(), U256::from(pool.amount_wei))]),
             instances: HashMap::from([(
-                pool.symbol(),
+                pool.symbol().to_string(),
                 Instance {
                     instance_address: HashMap::from([(pool.amount(), pool.address)]),
-                    symbol: pool.symbol(),
+                    symbol: pool.symbol().to_string(),
                     decimals: pool.asset.decimals(),
                 },
             )]),
@@ -153,7 +154,10 @@ mod tests {
             ..Default::default()
         };
 
-        let fee = status.fee(&pool, 1_000_000_000u128, U256::ZERO).unwrap();
+        let fee = status
+            .quote(&pool, 1_000_000_000u128, U256::ZERO)
+            .unwrap()
+            .fee;
 
         // 1% of 1 ETH + (1 gwei * 500,000 gas)
         assert_eq!(fee, U256::from(10_500_000_000_000_000u64));
@@ -165,12 +169,15 @@ mod tests {
 
         let status = RelayerStatus {
             tornado_service_fee: 1.0,
-            eth_prices: HashMap::from([(pool.symbol(), U256::from(1_000_000_000_000_000_000u64))]),
+            eth_prices: HashMap::from([(
+                pool.symbol().to_string(),
+                U256::from(1_000_000_000_000_000_000u64),
+            )]),
             instances: HashMap::from([(
-                pool.symbol(),
+                pool.symbol().to_string(),
                 Instance {
                     instance_address: HashMap::from([(pool.amount(), pool.address)]),
-                    symbol: pool.symbol(),
+                    symbol: pool.symbol().to_string(),
                     decimals: pool.asset.decimals(),
                 },
             )]),
@@ -179,8 +186,9 @@ mod tests {
         };
 
         let fee = status
-            .fee(&pool, 1_000_000_000u128, U256::from(100u64))
-            .unwrap();
+            .quote(&pool, 1_000_000_000u128, U256::from(100u64))
+            .unwrap()
+            .fee;
 
         // 1% of 100 DAI + ((1 gwei * 500,000 gas) + 100 refund) valued in DAI
         assert_eq!(fee, U256::from(1_000_500_000_000_000_100u64));

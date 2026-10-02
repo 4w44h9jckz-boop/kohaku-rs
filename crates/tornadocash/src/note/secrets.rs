@@ -8,15 +8,11 @@ macro_rules! bytes31_newtype {
         pub struct $name([u8; 31]);
 
         impl $name {
-            pub const LEN: usize = 31;
             pub const fn new(bytes: [u8; 31]) -> Self {
                 Self(bytes)
             }
             pub const fn as_bytes(&self) -> &[u8; 31] {
                 &self.0
-            }
-            pub fn into_bytes(self) -> [u8; 31] {
-                self.0
             }
         }
 

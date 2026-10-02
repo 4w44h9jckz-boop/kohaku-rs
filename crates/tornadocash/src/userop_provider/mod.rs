@@ -1,6 +1,8 @@
+//! Extension trait for building userops with a Tornadocash paymaster.
+
 use alloy::{
     primitives::{Address, Bytes, U256},
-    sol,
+    providers::Provider,
     sol_types::SolValue,
 };
 use kohaku_userop_kit::{
@@ -9,126 +11,170 @@ use kohaku_userop_kit::{
 };
 
 use crate::{
-    abis::tornado::Tornado, pool::Pool, provider::TornadoProviderError, withdrawal::Withdrawal,
+    merkle_tree::MerkleProof,
+    pool::Pool,
+    provider::TornadoProviderExt,
+    userop_provider::abis::{PaymasterData, TornadoAdapterData},
+    withdrawal::{Payer, ProvenWithdrawal, Withdrawal, WithdrawalError},
 };
 
-const FEE_BUFFER_BPS: u128 = 100; // 1% buffer
+mod abis;
 
-/// Extension trait for [`Withdrawal`] that adds support for tornadocash paymasters.
+/// Safety margin added to the quoted fee, in basis points.
+const FEE_BUFFER_BPS: u128 = 100;
+
+/// Fraction of the denomination offered as the fee for the first gas estimate.
+const SEED_FEE_DENOMINATOR: u64 = 10;
+
+/// Extension trait for [`UserOperationBuilder`] that pays for an operation with a tornadocash
+/// note.
 ///
-/// Tornadocash paymasters use a shielded note to pay for a `UserOp`'s gas. The leftover note value
-/// is sent to the withdrawal's recipient address.
-pub trait WithdrawalPaymasterExt: Sized {
-    fn sponsor<S, R>(
+/// Tornadocash paymasters use a shielded note to pay for a `UserOp`'s gas. The remainder of the
+/// note is withdrawn to the recipient during validation and available during the operation's
+/// execution.
+pub trait UserOperationPaymasterExt: Sized {
+    /// Pays for this operation's gas out of `withdrawal`'s note.
+    ///
+    /// # Errors
+    /// Returns an error if the pool has no paymaster, if the note cannot cover the operation's
+    /// gas, or if proving, estimation, or the fee quote fails.
+    fn with_tornado_paymaster<R>(
         self,
+        withdrawal: Withdrawal,
+        merkle_proof: &MerkleProof,
+        provider: &impl Provider,
         bundler: &dyn Bundler,
-        builder: UserOperationBuilder<S>,
         rng: &mut R,
-    ) -> impl std::future::Future<Output = Result<UserOperationBuilder<S>, TornadoPaymasterError>>
+    ) -> impl std::future::Future<Output = Result<Self, TornadoPaymasterError>>
     where
-        S: Send + Sync,
         R: rand::CryptoRng;
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum TornadoPaymasterError {
-    #[error("Pool missing paymaster address: {0}")]
-    PoolMissingPaymasterAddress(Pool),
+    #[error("Pool missing paymaster: {0}")]
+    PoolMissingPaymaster(Pool),
+    #[error("Pool denomination cannot cover the operation's gas: {required} > {denomination}")]
+    InsufficientDenomination { required: U256, denomination: U256 },
+    #[error("Operation outgrew the proven fee: {required} > {fee}")]
+    InsufficientFee { required: U256, fee: U256 },
     #[error("Bundler error: {0}")]
     Bundler(#[from] kohaku_userop_kit::bundler::BundlerError),
-    #[error(transparent)]
-    TornadoProvider(#[from] TornadoProviderError),
+    #[error("Provider error: {0}")]
+    Provider(#[from] alloy::contract::Error),
+    #[error("Withdrawal error: {0}")]
+    Withdrawal(#[from] WithdrawalError),
+    #[error("Merkle tree error: {0}")]
+    MerkleTree(#[from] kohaku_merkle_tree::MerkleTreeError),
 }
 
-sol!(
-    struct PaymasterData {
-        address adapter;
-        bytes adapterData;
-    }
-
-    struct TornadoAdapterData {
-        bytes proof;
-        bytes32 root;
-        bytes32 nullifierHash;
-        address recipient;
-        address relayer;
-        uint256 fee;
-        uint256 refund;
-    }
-);
-
-impl WithdrawalPaymasterExt for Withdrawal {
+impl<S> UserOperationPaymasterExt for UserOperationBuilder<S> {
     #[tracing::instrument(skip_all)]
-    async fn sponsor<S, R>(
+    async fn with_tornado_paymaster<R>(
         self,
+        withdrawal: Withdrawal,
+        merkle_proof: &MerkleProof,
+        provider: &impl Provider,
         bundler: &dyn Bundler,
-        mut builder: UserOperationBuilder<S>,
         rng: &mut R,
-    ) -> Result<UserOperationBuilder<S>, TornadoPaymasterError>
+    ) -> Result<Self, TornadoPaymasterError>
     where
-        S: Send + Sync,
         R: rand::CryptoRng,
     {
-        let pool = self.pool().await?;
+        let pool = withdrawal.pool.clone();
+        let denomination = U256::from(pool.amount_wei);
 
-        let paymaster = pool.paymaster_address.ok_or_else(|| {
-            TornadoPaymasterError::PoolMissingPaymasterAddress(pool.clone())
-        })?;
-        let adapter = pool.adapter_address.ok_or_else(|| {
-            TornadoPaymasterError::PoolMissingPaymasterAddress(pool.clone())
-        })?;
+        //? The paymaster runs the withdrawal before checking the fee, so even this throwaway
+        //? estimate needs a real proof.
+        let seed = denomination / U256::from(SEED_FEE_DENOMINATOR);
+        let builder =
+            estimate_at_fee(self, withdrawal.clone(), seed, merkle_proof, bundler, rng).await?;
 
-        let mut fee_estimate = U256::from(pool.amount_wei);
+        let cost = gas_cost(provider, &pool, &builder).await?;
+        let fee = cost + cost * U256::from(FEE_BUFFER_BPS) / U256::from(10_000);
+        if fee > denomination {
+            return Err(TornadoPaymasterError::InsufficientDenomination {
+                required: fee,
+                denomination,
+            });
+        }
 
-        loop {
-            let withdraw_call = self
-                .clone()
-                .with_relayer(paymaster)
-                .with_fee(fee_estimate)
-                .into_call(rng)
-                .await?;
-            let paymaster_data = encode_paymaster_data(adapter, withdraw_call);
-            builder = builder.with_paymaster_and_data(paymaster, paymaster_data);
-            builder = builder.with_gas_estimate(bundler).await?;
+        let builder = estimate_at_fee(builder, withdrawal, fee, merkle_proof, bundler, rng).await?;
 
-            let wei = max_gas(&builder);
-            let new_fee_estimate = self.provider().quote_wei_in_fee_token(&pool, wei).await?;
-            if new_fee_estimate <= fee_estimate {
-                break;
-            }
-
-            let fee_buffer = new_fee_estimate * U256::from(FEE_BUFFER_BPS) / U256::from(10_000);
-            fee_estimate = new_fee_estimate + fee_buffer;
+        //? The proof is bound to `fee`, so a grown estimate can only be refused.
+        let settled = gas_cost(provider, &pool, &builder).await?;
+        if settled > fee {
+            return Err(TornadoPaymasterError::InsufficientFee {
+                required: settled,
+                fee,
+            });
         }
 
         Ok(builder)
     }
 }
 
-/// Encodes the paymaster data for a tornadocash withdrawal call.
-fn encode_paymaster_data(adapter: Address, withdraw_call: Tornado::withdrawCall) -> Bytes {
+async fn estimate_at_fee<S, R>(
+    builder: UserOperationBuilder<S>,
+    withdrawal: Withdrawal,
+    fee: U256,
+    merkle_proof: &MerkleProof,
+    bundler: &dyn Bundler,
+    rng: &mut R,
+) -> Result<UserOperationBuilder<S>, TornadoPaymasterError>
+where
+    R: rand::CryptoRng,
+{
+    let pool = withdrawal.pool.clone();
+    let info = pool
+        .paymaster
+        .ok_or(TornadoPaymasterError::PoolMissingPaymaster(pool))?;
+
+    let withdrawal = withdrawal
+        .with_payer(Payer {
+            address: info.address,
+            fee,
+            refund: U256::ZERO,
+        })
+        .prove(merkle_proof, rng)?;
+
+    Ok(builder
+        .with_paymaster_and_data(
+            info.address,
+            encode_paymaster_data(info.adapter, &withdrawal),
+        )
+        .with_gas_estimate(bundler)
+        .await?)
+}
+
+/// Quotes the operation's maximum gas cost in the pool's fee token.
+async fn gas_cost<S>(
+    provider: &impl Provider,
+    pool: &Pool,
+    builder: &UserOperationBuilder<S>,
+) -> Result<U256, TornadoPaymasterError> {
+    let user_op = builder.build();
+    let gas = U256::from(user_op.total_gas_limit());
+    let price =
+        U256::from(user_op.user_op.max_fee_per_gas + user_op.user_op.max_priority_fee_per_gas);
+
+    Ok(provider.quote_wei_in_fee_token(pool, gas * price).await?)
+}
+
+fn encode_paymaster_data(adapter: Address, withdrawal: &ProvenWithdrawal) -> Bytes {
     let adapter_data = TornadoAdapterData {
-        proof: withdraw_call._proof,
-        root: withdraw_call._root,
-        nullifierHash: withdraw_call._nullifierHash,
-        recipient: withdraw_call._recipient,
-        relayer: withdraw_call._relayer,
-        fee: withdraw_call._fee,
-        refund: withdraw_call._refund,
+        proof: withdrawal.proof_bytes(),
+        root: withdrawal.root.into(),
+        nullifierHash: withdrawal.note.nullifier_hash().into(),
+        recipient: withdrawal.recipient,
+        relayer: withdrawal.payer.address,
+        fee: withdrawal.payer.fee,
+        refund: withdrawal.payer.refund,
     };
     let data = PaymasterData {
         adapter,
         adapterData: adapter_data.abi_encode().into(),
     };
+
     data.abi_encode().into()
-}
-
-/// Returns the maximum gas cost of a user operation builder.
-fn max_gas<S>(builder: &UserOperationBuilder<S>) -> U256 {
-    let user_op = builder.build();
-    let total_gas_limit = U256::from(user_op.total_gas_limit());
-    let max_fee_per_gas =
-        U256::from(user_op.user_op.max_fee_per_gas + user_op.user_op.max_priority_fee_per_gas);
-
-    total_gas_limit * max_fee_per_gas
 }

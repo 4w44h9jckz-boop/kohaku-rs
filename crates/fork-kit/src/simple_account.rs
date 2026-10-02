@@ -1,6 +1,6 @@
-//! 4337 SimpleSmartAccount deployment.
+//! 4337 `SimpleSmartAccount` deployment.
 //!
-//! SimpleSmartAccount is a minimal ERC-7702 impl that can be used for testing purposes. The
+//! `SimpleSmartAccount` is a minimal ERC-7702 impl that can be used for testing purposes. The
 //! bytecode is pulled from pimlicolabs/alto's [e2e tests](https://github.com/pimlicolabs/alto/blob/main/test/e2e/deploy-contracts/constants.ts).
 
 use alloy::{

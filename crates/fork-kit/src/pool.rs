@@ -4,9 +4,12 @@ use alloy::{
     primitives::{Address, U256},
     providers::{DynProvider, Provider},
 };
-use kohaku_tornadocash::pool::{Asset, Pool};
+use kohaku_tornadocash::{asset::Asset, pool::Pool};
 
 mod sol {
+    #![allow(clippy::all)]
+    #![allow(clippy::pedantic)]
+
     use alloy::sol;
 
     sol!(
@@ -63,8 +66,7 @@ pub async fn deploy_pool(
         asset: Asset::ETH,
         amount_wei: denomination_wei,
         deployed_block: 0,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     })
 }
 

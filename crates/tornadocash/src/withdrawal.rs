@@ -1,140 +1,176 @@
-use std::fmt;
+use std::{array::from_fn, ops::Deref};
 
 use alloy::{
-    network::TransactionBuilder, primitives::Address, providers::Provider,
-    rpc::types::TransactionRequest, sol_types::SolCall,
+    network::TransactionBuilder,
+    primitives::{Address, Bytes},
+    rpc::types::TransactionRequest,
+    sol_types::SolCall,
 };
+use kohaku_tornadocash_circuit::{CircuitInputs, prove};
 use rand::CryptoRng;
 use ruint::aliases::U256;
+use websnark_rs::proof::Proof;
 
 use crate::{
-    abis::tornado::Tornado::withdrawCall,
-    note::Note,
-    pool::Pool,
-    provider::{TornadoProvider, TornadoProviderError},
-    relayer::{Relayer, RelayerError, client::JobReceipt},
+    abis::tornado::Tornado::withdrawCall, merkle_tree::MerkleProof, note::Note, pool::Pool,
 };
 
-#[derive(Clone)]
+/// A Tornado Cash withdrawal.
+#[derive(Debug, Clone)]
 pub struct Withdrawal {
-    provider: TornadoProvider,
-    note: Note,
-    recipient: Address,
-    relayer: Option<Address>,
-    fee: Option<U256>,
-    refund: Option<U256>,
+    pub pool: Pool,
+    pub note: Note,
+    pub recipient: Address,
+    pub payer: Payer,
+}
+
+/// A proven Tornado Cash withdrawal.
+#[derive(Debug, Clone)]
+pub struct ProvenWithdrawal {
+    pub root: U256,
+    pub proof: Proof,
+    pub inner: Withdrawal,
+}
+
+/// The payer of a withdrawal transaction.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub struct Payer {
+    pub address: Address,
+    pub fee: U256,
+    pub refund: U256,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum WithdrawalError {
+    #[error("Circuit error: {0}")]
+    Circuit(#[from] kohaku_tornadocash_circuit::CircuitError),
+    #[error("Proof leaf mismatch: expected {expected}, got {actual}")]
+    ProofLeafMismatch { expected: U256, actual: U256 },
 }
 
 impl Withdrawal {
-    pub fn new(provider: TornadoProvider, note: Note, recipient: Address) -> Self {
+    #[must_use]
+    pub fn new(pool: &Pool, note: Note, recipient: Address) -> Self {
         Self {
-            provider,
+            pool: pool.clone(),
             note,
             recipient,
-            relayer: None,
-            fee: None,
-            refund: None,
+            payer: Payer::default(),
         }
     }
 
-    pub fn with_refund(mut self, refund: U256) -> Self {
-        self.refund = Some(refund);
-        self
-    }
-
-    pub fn with_relayer(mut self, relayer: Address) -> Self {
-        self.relayer = Some(relayer);
-        self
-    }
-
-    pub fn with_fee(mut self, fee: U256) -> Self {
-        self.fee = Some(fee);
-        self
-    }
-
-    /// Returns the pool this withdrawal is for.
     #[must_use]
-    pub async fn pool(&self) -> Result<Pool, TornadoProviderError> {
-        self.provider.pool_from_note(&self.note).await
+    pub fn with_payer(mut self, payer: Payer) -> Self {
+        self.payer = payer;
+        self
     }
 
-    /// Returns the provider this withdrawal was created from.
-    #[must_use]
-    pub fn provider(&self) -> &TornadoProvider {
-        &self.provider
-    }
-
-    /// Converts the withdrawal into an alloy [`TransactionRequest`].
-    pub async fn into_transaction(
-        self,
-        rng: &mut impl CryptoRng,
-    ) -> Result<TransactionRequest, TornadoProviderError> {
-        let call = self.as_call(rng).await?;
-
-        Ok(TransactionRequest::default()
-            .with_to(self.pool().await?.address)
-            .with_input(call.abi_encode())
-            .with_value(self.refund.unwrap_or_default()))
-    }
-
-    /// Submits the withdrawal to this relayer.
+    /// Generates the proof this withdrawal needs to be submitted.
     ///
-    /// Overrides any already set relayer or fee values.
-    pub async fn relay(
-        mut self,
-        relayer: &Relayer,
-        rng: &mut impl CryptoRng,
-    ) -> Result<JobReceipt, RelayerError> {
-        let status = relayer.status().await?;
-        let gas_price = self.provider.inner_provider().get_gas_price().await?;
-
-        self.fee = Some(status.fee(
-            &self.pool().await?,
-            gas_price,
-            self.refund.unwrap_or_default(),
-        )?);
-        self.relayer = Some(status.reward_account);
-
-        let call = self.as_call(rng).await?;
-        relayer.withdraw(&self.pool().await?, call).await
-    }
-
-    /// Converts the withdrawal into a raw [`withdrawCall`] struct.
-    pub(crate) async fn into_call(
+    /// `tree` must already contain this withdrawal's note, and its root must still be within the
+    /// pool's on-chain root history for the withdrawal to be accepted.
+    ///
+    /// # Errors
+    /// Returns an error if the note is missing from `tree` or if proof generation fails.
+    pub fn prove(
         self,
+        merkle_proof: &MerkleProof,
         rng: &mut impl CryptoRng,
-    ) -> Result<withdrawCall, TornadoProviderError> {
-        self.as_call(rng).await
-    }
+    ) -> Result<ProvenWithdrawal, WithdrawalError> {
+        if merkle_proof.leaf != self.note.commitment() {
+            return Err(WithdrawalError::ProofLeafMismatch {
+                expected: self.note.commitment(),
+                actual: merkle_proof.leaf,
+            });
+        }
 
-    async fn as_call(
-        &self,
-        rng: &mut impl CryptoRng,
-    ) -> Result<withdrawCall, TornadoProviderError> {
-        Ok(self
-            .provider
-            .provider_from_note(&self.note)
-            .await?
-            .prove_withdrawal(
-                &self.note,
-                self.recipient,
-                self.relayer,
-                self.fee,
-                self.refund,
-                rng,
-            )
-            .await?)
+        let path_elements = merkle_proof.siblings;
+        let path_indices = from_fn(|i| U256::from(merkle_proof.path[i]));
+
+        let circuit_inputs = CircuitInputs::new(
+            merkle_proof.root,
+            self.note.nullifier_hash(),
+            self.recipient.into_word().into(),
+            self.payer.address.into_word().into(),
+            self.payer.fee,
+            self.payer.refund,
+            self.note.nullifier.into(),
+            self.note.secret.into(),
+            path_elements,
+            path_indices,
+        );
+
+        let proof = prove(&circuit_inputs, rng)?;
+        Ok(ProvenWithdrawal {
+            root: merkle_proof.root,
+            proof,
+            inner: self,
+        })
     }
 }
 
-impl fmt::Debug for Withdrawal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Withdrawal")
-            .field("note", &self.note)
-            .field("recipient", &self.recipient)
-            .field("relayer", &self.relayer)
-            .field("fee", &self.fee)
-            .field("refund", &self.refund)
-            .finish()
+impl ProvenWithdrawal {
+    /// Returns the input data for this withdrawal transaction.
+    #[must_use]
+    pub fn input(&self) -> Vec<u8> {
+        withdrawCall {
+            _proof: self.proof_bytes(),
+            _root: self.root.into(),
+            _nullifierHash: self.note.nullifier_hash().into(),
+            _recipient: self.recipient,
+            _relayer: self.payer.address,
+            _fee: self.payer.fee,
+            _refund: self.payer.refund,
+        }
+        .abi_encode()
     }
+
+    /// Returns the target address for this withdrawal transaction.
+    #[must_use]
+    pub fn target(&self) -> Address {
+        self.pool.address
+    }
+
+    /// Returns the proof in the format expected by the Solidity contract.
+    #[must_use]
+    pub fn proof_bytes(&self) -> Bytes {
+        into_solidity_proof(&self.proof)
+    }
+}
+
+impl Deref for ProvenWithdrawal {
+    type Target = Withdrawal;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl From<ProvenWithdrawal> for TransactionRequest {
+    fn from(proven_withdrawal: ProvenWithdrawal) -> Self {
+        TransactionRequest::default()
+            .with_to(proven_withdrawal.target())
+            .input(proven_withdrawal.input().into())
+    }
+}
+
+/// Convert a websnark proof into the format expected by the Solidity contract.
+fn into_solidity_proof(proof: &Proof) -> Bytes {
+    let proof_elements: [U256; 8] = [
+        proof.a.x.into(),
+        proof.a.y.into(),
+        //? Order of b elements are reversed to match Solidity's expected format
+        proof.b.x.c1.into(),
+        proof.b.x.c0.into(),
+        proof.b.y.c1.into(),
+        proof.b.y.c0.into(),
+        proof.c.x.into(),
+        proof.c.y.into(),
+    ];
+    let mut proof_bytes = Vec::with_capacity(256);
+    for elem in &proof_elements {
+        proof_bytes.extend_from_slice(&elem.to_be_bytes::<32>());
+    }
+
+    proof_bytes.into()
 }

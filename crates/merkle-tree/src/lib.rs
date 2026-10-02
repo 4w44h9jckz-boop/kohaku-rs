@@ -26,6 +26,8 @@ pub enum MerkleTreeError {
     IndexOutOfBounds(usize),
     #[error("store error: {0}")]
     Store(#[from] StoreError),
+    #[error("Other: {0}")]
+    Other(String),
 }
 
 impl<const D: usize, H: Hasher> MerkleTree<D, H> {

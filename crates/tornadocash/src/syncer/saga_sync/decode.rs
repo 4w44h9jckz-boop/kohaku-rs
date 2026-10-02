@@ -12,8 +12,11 @@ use super::{
     manifest::{ChunkRef, deserialize_hex_u64},
 };
 use crate::{
-    abis::tornado::Tornado::{Deposit, Withdrawal},
-    indexer::syncer::SyncEvent,
+    abis::tornado::Tornado,
+    syncer::{
+        SyncEvent,
+        event::{Deposit, Withdrawal},
+    },
 };
 
 /// One line of a saga-sync chunk file.
@@ -38,12 +41,25 @@ impl SagaEvent {
         let data = hex::decode(self.data.strip_prefix("0x").unwrap_or(&self.data))?;
 
         match self.topics.first() {
-            Some(&Deposit::SIGNATURE_HASH) => Ok(Some(SyncEvent::Deposit(
-                Deposit::decode_raw_log(self.topics.iter().copied(), &data)?,
-            ))),
-            Some(&Withdrawal::SIGNATURE_HASH) => Ok(Some(SyncEvent::Withdrawal(
-                Withdrawal::decode_raw_log(self.topics.iter().copied(), &data)?,
-            ))),
+            Some(&Tornado::Deposit::SIGNATURE_HASH) => {
+                let decoded = Tornado::Deposit::decode_raw_log(self.topics.iter().copied(), &data)?;
+                Ok(Some(SyncEvent::Deposit(Deposit {
+                    commitment: decoded.commitment,
+                    leaf_index: decoded.leafIndex,
+                    block_number: self.block_number,
+                })))
+            }
+            Some(&Tornado::Withdrawal::SIGNATURE_HASH) => {
+                let decoded =
+                    Tornado::Withdrawal::decode_raw_log(self.topics.iter().copied(), &data)?;
+                Ok(Some(SyncEvent::Withdrawal(Withdrawal {
+                    to: decoded.to,
+                    nullifier_hash: decoded.nullifierHash,
+                    relayer: decoded.relayer,
+                    fee: decoded.fee,
+                    block_number: self.block_number,
+                })))
+            }
             _ => Ok(None),
         }
     }
@@ -131,7 +147,7 @@ mod tests {
     use flate2::{Compression, write::GzEncoder};
 
     use super::*;
-    use crate::indexer::saga_sync::manifest::Digest;
+    use crate::syncer::saga_sync::manifest::Digest;
 
     fn gzip(bytes: &[u8]) -> Vec<u8> {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());

@@ -1,13 +1,15 @@
 use alloy::primitives::{Address, B256, U256};
-use reqwest::{Client, Url};
+use reqwest::Client;
 use serde::Deserialize;
 use thiserror::Error;
 use tracing::info;
 
 use crate::{
-    abis::tornado::Tornado::{Deposit, Withdrawal},
-    indexer::syncer::{SyncEvent, SyncerBackend, SyncerError},
     pool::Pool,
+    syncer::{
+        Snapshot, SyncEvent, Syncer, SyncerError,
+        event::{Deposit, Withdrawal},
+    },
 };
 
 /// A syncer that reads from a remote database of cached data.
@@ -27,7 +29,7 @@ struct RemoteDeposit {
     pub block_number: u64,
     pub commitment: B256,
     pub leaf_index: u32,
-    pub timestamp: U256,
+    // pub timestamp: U256,
 }
 
 #[derive(Deserialize)]
@@ -58,52 +60,52 @@ impl RemoteSyncer {
 
 #[cfg_attr(native, async_trait::async_trait)]
 #[cfg_attr(wasm, async_trait::async_trait(?Send))]
-impl SyncerBackend for RemoteSyncer {
-    async fn latest_block(&self, pool: &Pool) -> Result<u64, SyncerError> {
-        let deposits = self.deposits(pool).await.map_err(SyncerError::other)?;
-        let withdrawals = self.withdrawals(pool).await.map_err(SyncerError::other)?;
-
-        let latest_deposit = deposits.iter().map(|d| d.block_number).max().unwrap_or(0);
-        let latest_nullifier = withdrawals
-            .iter()
-            .map(|n| n.block_number)
-            .max()
-            .unwrap_or(0);
-
-        Ok(latest_deposit.max(latest_nullifier))
+impl Syncer for RemoteSyncer {
+    async fn sync_range(
+        &self,
+        pool: &Pool,
+        from_block: u64,
+        to_block: u64,
+    ) -> Result<Snapshot, SyncerError> {
+        self.sync(pool, from_block, to_block)
+            .await
+            .map_err(SyncerError::other)
     }
+}
 
+impl RemoteSyncer {
     async fn sync(
         &self,
         pool: &Pool,
         from_block: u64,
         to_block: u64,
-    ) -> Result<Vec<SyncEvent>, SyncerError> {
-        info!("Syncing from {} to {}", from_block, to_block);
+    ) -> Result<Snapshot, RemoteSyncerError> {
+        let deposits = self.deposits(pool).await?;
+        let withdrawals = self.withdrawals(pool).await?;
 
-        let deposits = self.deposits(pool).await.map_err(SyncerError::other)?;
-        let withdrawals = self.withdrawals(pool).await.map_err(SyncerError::other)?;
+        //? The cache only covers up to the last block it holds an event for.
+        let from = from_block.max(pool.deployed_block);
+        let latest = latest_block(&deposits, &withdrawals).saturating_add(1);
+        let range = from..to_block.min(latest).max(from);
 
-        let deposits: Vec<Deposit> = deposits
+        info!("Syncing from {} to {}", range.start, range.end);
+
+        let deposits: Vec<SyncEvent> = deposits
             .into_iter()
-            .filter(|d| d.block_number >= from_block && d.block_number <= to_block)
+            .filter(|d| range.contains(&d.block_number))
             .map(Into::into)
             .collect();
-        let withdrawals: Vec<Withdrawal> = withdrawals
+        let withdrawals: Vec<SyncEvent> = withdrawals
             .into_iter()
-            .filter(|n| n.block_number >= from_block && n.block_number <= to_block)
+            .filter(|n| range.contains(&n.block_number))
             .map(Into::into)
             .collect();
 
-        Ok(deposits
-            .into_iter()
-            .map(SyncEvent::Deposit)
-            .chain(withdrawals.into_iter().map(SyncEvent::Withdrawal))
-            .collect())
+        let events = deposits.into_iter().chain(withdrawals).collect();
+
+        Ok(Snapshot { range, events })
     }
-}
 
-impl RemoteSyncer {
     async fn deposits(&self, pool: &Pool) -> Result<Vec<RemoteDeposit>, RemoteSyncerError> {
         let resp = self
             .client
@@ -141,49 +143,57 @@ impl RemoteSyncer {
     }
 }
 
-impl From<RemoteDeposit> for Deposit {
+impl From<RemoteDeposit> for SyncEvent {
     fn from(remote: RemoteDeposit) -> Self {
-        Deposit {
+        SyncEvent::Deposit(Deposit {
             commitment: remote.commitment,
-            leafIndex: remote.leaf_index,
-            timestamp: remote.timestamp,
-        }
+            leaf_index: remote.leaf_index,
+            block_number: remote.block_number,
+        })
     }
 }
 
-impl From<RemoteWithdrawal> for Withdrawal {
+impl From<RemoteWithdrawal> for SyncEvent {
     fn from(remote: RemoteWithdrawal) -> Self {
-        Withdrawal {
-            nullifierHash: remote.nullifier,
+        SyncEvent::Withdrawal(Withdrawal {
             to: remote.to,
+            nullifier_hash: remote.nullifier,
             relayer: Address::ZERO,
             fee: remote.fee,
-        }
+            block_number: remote.block_number,
+        })
     }
 }
 
-fn deposits_url(base: &str, pool: &Pool) -> Url {
-    format!(
-        "{}/{}_{}_{}_deposits.ndjson",
-        base,
-        pool.chain_id,
-        pool.symbol().to_uppercase(),
-        pool.amount()
-    )
-    .parse()
-    .unwrap()
+/// Returns the highest block number covered by the cached deposits and withdrawals.
+fn latest_block(deposits: &[RemoteDeposit], withdrawals: &[RemoteWithdrawal]) -> u64 {
+    let latest_deposit = deposits.iter().map(|d| d.block_number).max().unwrap_or(0);
+    let latest_withdrawal = withdrawals
+        .iter()
+        .map(|n| n.block_number)
+        .max()
+        .unwrap_or(0);
+
+    latest_deposit.max(latest_withdrawal)
 }
 
-fn withdrawals_url(base: &str, pool: &Pool) -> Url {
+fn deposits_url(base: &str, pool: &Pool) -> String {
+    url(base, pool, "deposits")
+}
+
+fn withdrawals_url(base: &str, pool: &Pool) -> String {
+    url(base, pool, "nullifiers")
+}
+
+fn url(base: &str, pool: &Pool, suffix: &str) -> String {
     format!(
-        "{}/{}_{}_{}_nullifiers.ndjson",
+        "{}/{}_{}_{}_{}.ndjson",
         base,
         pool.chain_id,
         pool.symbol().to_uppercase(),
-        pool.amount()
+        pool.amount(),
+        suffix
     )
-    .parse()
-    .unwrap()
 }
 
 #[cfg(test)]

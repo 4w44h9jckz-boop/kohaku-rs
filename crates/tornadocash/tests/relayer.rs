@@ -1,5 +1,6 @@
 use alloy::{
     node_bindings::Anvil,
+    primitives::U256,
     providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
 };
@@ -8,8 +9,12 @@ use kohaku_fork_kit::{
     relayer::RelayerBuilder,
 };
 use kohaku_kv_store::Store;
-use kohaku_tornadocash::{indexer::rpc::RpcSyncer, provider::TornadoProvider, relayer::Relayer};
-use tracing::info;
+use kohaku_tornadocash::{
+    deposit::Deposit,
+    merkle_tree::{MerkleTree, MerkleTreeExt},
+    syncer::{Syncer, rpc::RpcSyncer},
+    withdrawal::Withdrawal,
+};
 
 #[tokio::test]
 #[ignore = "run with `cargo test --release -- --ignored`"]
@@ -29,32 +34,12 @@ async fn test_relayer_withdraw() -> Result<(), anyhow::Error> {
     let pool = deploy_pool(provider.clone(), None).await?;
     let proxy_address = deploy_proxy(provider.clone()).await?;
 
-    let store = Store::create();
-    let syncer = RpcSyncer::new(provider.clone());
-    let tornado_provider = TornadoProvider::new(
-        store,
-        syncer.clone().into(),
-        syncer.clone().into(),
-        provider.clone(),
-    );
-
-    info!("Depositing into pool");
-    let deposit = tornado_provider.deposit(pool.clone(), &mut rand::rng()).await;
-    let note = deposit.note();
-    provider
-        .send_transaction(deposit.into())
-        .await?
-        .get_receipt()
-        .await?;
-    tornado_provider.sync().await?;
-
-    info!("Starting local tornado-relayer");
     let relayer_signer = PrivateKeySigner::random();
     let reward_account = PrivateKeySigner::random().address();
-    let relayer_instance = RelayerBuilder::new(
+    let relayer = RelayerBuilder::new(
         anvil.endpoint(),
         anvil.ws_endpoint(),
-        pool,
+        pool.clone(),
         proxy_address,
         relayer_signer.to_bytes().to_string(),
         reward_account,
@@ -64,22 +49,49 @@ async fn test_relayer_withdraw() -> Result<(), anyhow::Error> {
     .spawn()
     .await?;
 
-    let relayer = Relayer::from_client(relayer_instance.clone());
+    // Deposit a note
+    let deposit = Deposit::new(&pool, rand::random());
+    let note = deposit.note();
+    provider
+        .send_transaction(deposit.into())
+        .await?
+        .watch()
+        .await?;
 
-    info!("Building withdrawal, relaying via {relayer_signer:?}");
+    // Construct a TornadoProvider
+    let syncer = RpcSyncer::new(provider.clone());
+
+    // Sync a Merkle tree against the provider
+    let tree = MerkleTree::new(Store::create());
+    let snapshot = syncer.sync(&pool, ..).await?;
+    tree.splice_events(&snapshot.events).await?;
+
+    // Withdraw the note via the relayer
     let recipient = PrivateKeySigner::random().address();
-    let receipt = tornado_provider
-        .withdraw(note, recipient)
-        .relay(&relayer, &mut rand::rng())
-        .await?;
-    info!("Relayer accepted withdrawal job {receipt:?}");
+    let status = relayer.status().await?;
+    let gas_price = provider.get_gas_price().await?;
+    let merkle_proof = tree.leaf_proof(note.commitment()).await?;
+    let withdrawal = Withdrawal::new(&pool, note, recipient)
+        .with_payer(status.quote(&pool, gas_price, U256::ZERO)?)
+        .prove(&merkle_proof, &mut rand::rng())?;
 
+    let receipt = relayer.withdraw(withdrawal).await?;
     let tx_hash = relayer
-        .await_confirmation(&tornado_provider, &receipt)
-        .await?;
+        .await_confirmation(&provider, &receipt)
+        .await?
+        .unwrap();
+
+    // Assert transaction was successful
+    let tx_receipt = provider.get_transaction_receipt(tx_hash).await?;
+    assert!(tx_receipt.is_some(), "Transaction receipt should exist");
+    let tx_receipt = tx_receipt.unwrap();
+    assert!(tx_receipt.status(), "Transaction should succeed");
+
+    // Assert recipient balance
+    let balance = provider.get_balance(recipient).await?;
     assert!(
-        tx_hash.is_some(),
-        "relayer should have confirmed the withdrawal on-chain"
+        balance > U256::ZERO,
+        "Recipient balance should be non-zero after relayer withdrawal"
     );
 
     Ok(())

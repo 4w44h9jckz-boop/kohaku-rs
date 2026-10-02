@@ -1,56 +1,30 @@
-use std::fmt;
-
-use alloy::{network::TransactionBuilder, rpc::types::TransactionRequest, sol_types::SolCall};
+use alloy::{
+    network::TransactionBuilder, primitives::Address, rpc::types::TransactionRequest,
+    sol_types::SolCall,
+};
 use ruint::aliases::U256;
 
 use crate::{
-    abis::tornado::Tornado,
-    note::{Note, Nullifier, Secret},
-    pool::{Asset, Pool},
-    provider::TornadoProvider,
+    abis::{erc20::ERC20, tornado::Tornado},
+    asset::Asset,
+    note::Note,
+    pool::Pool,
 };
 
-#[derive(Clone)]
+/// A Tornado Cash deposit.
+#[derive(Debug, Clone)]
 pub struct Deposit {
-    provider: TornadoProvider,
-    pool: Pool,
-    nullifier: Nullifier,
-    secret: Secret,
+    pub pool: Pool,
+    pub note: Note,
 }
 
 impl Deposit {
-    pub fn new(
-        provider: TornadoProvider,
-        pool: Pool,
-        nullifier: Nullifier,
-        secret: Secret,
-    ) -> Self {
+    #[must_use]
+    pub fn new(pool: &Pool, note: Note) -> Self {
         Self {
-            provider,
-            pool,
-            nullifier,
-            secret,
+            pool: pool.clone(),
+            note,
         }
-    }
-
-    pub fn with_nullifier(self, nullifier: Nullifier) -> Self {
-        Self { nullifier, ..self }
-    }
-
-    pub fn with_secret(self, secret: Secret) -> Self {
-        Self { secret, ..self }
-    }
-
-    /// Returns the pool this deposit is for.
-    #[must_use]
-    pub fn pool(&self) -> &Pool {
-        &self.pool
-    }
-
-    /// Returns the provider this deposit was created from.
-    #[must_use]
-    pub fn provider(&self) -> &TornadoProvider {
-        &self.provider
     }
 
     /// Returns the value required for this deposit transaction.
@@ -75,34 +49,47 @@ impl Deposit {
         deposit_call.abi_encode()
     }
 
+    /// Returns the target address for this deposit transaction.
+    #[must_use]
+    pub fn target(&self) -> Address {
+        self.pool.address
+    }
+
+    /// Returns the ERC20 approval transaction this deposit requires, if any.
+    ///
+    /// Native-asset pools return [`None`]. ERC20 pools pull the deposit with `transferFrom`, so
+    /// the depositor must approve the pool to spend the pool's denomination first, or the
+    /// deposit transaction will revert.
+    #[must_use]
+    pub fn approval(&self) -> Option<TransactionRequest> {
+        let Asset::Erc20 { address, .. } = self.pool.asset else {
+            return None;
+        };
+
+        let approve_call = ERC20::approveCall {
+            spender: self.pool.address,
+            amount: U256::from(self.pool.amount_wei),
+        };
+
+        Some(
+            TransactionRequest::default()
+                .with_to(address)
+                .input(approve_call.abi_encode().into()),
+        )
+    }
+
     /// Returns the note associated with this deposit.
     #[must_use]
     pub fn note(&self) -> Note {
-        Note::new(
-            self.nullifier,
-            self.secret,
-            self.pool.symbol(),
-            self.pool.amount(),
-            self.pool.chain_id,
-        )
+        self.note.clone()
     }
 }
 
 impl From<Deposit> for TransactionRequest {
     fn from(deposit: Deposit) -> Self {
         TransactionRequest::default()
-            .with_to(deposit.pool.address)
+            .with_to(deposit.target())
             .with_value(deposit.value())
             .input(deposit.input().into())
-    }
-}
-
-impl fmt::Debug for Deposit {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Deposit")
-            .field("pool", &self.pool)
-            .field("nullifier", &self.nullifier)
-            .field("secret", &self.secret)
-            .finish()
     }
 }

@@ -1,7 +1,6 @@
 use ark_bn254::Fr;
 use ark_ff::{AdditiveGroup, Field};
 use num_bigint::BigInt as NumBigInt;
-use num_traits::One;
 
 use crate::crypto::test_bit;
 
@@ -26,7 +25,7 @@ impl Point {
         PointProjective {
             x: self.x,
             y: self.y,
-            z: Fr::one(),
+            z: Fr::ONE,
         }
     }
 
@@ -35,8 +34,8 @@ impl Point {
 
         let mut r = PointProjective {
             x: Fr::ZERO,
-            y: Fr::one(),
-            z: Fr::one(),
+            y: Fr::ONE,
+            z: Fr::ONE,
         };
 
         let mut exp = self.projective();

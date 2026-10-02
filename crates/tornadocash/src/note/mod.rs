@@ -1,6 +1,9 @@
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, ops::Deref, str::FromStr};
 
-use rand::{CryptoRng, RngExt};
+use rand::{
+    RngExt,
+    distr::{Distribution, StandardUniform},
+};
 use ruint::aliases::U256;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -18,7 +21,19 @@ mod secrets;
 pub struct Note {
     pub nullifier: Nullifier,
     pub secret: Secret,
+}
 
+/// Displayable Tornadocash note.
+///
+/// Includes hints for the note's asset & pool. Parses from and formats to strings in the
+/// standard tornadocash format.
+///
+/// ```text
+/// tornado-{symbol}-{amount}-{chain_id}-0x{nullifier}{secret}
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteString {
+    pub note: Note,
     pub symbol: String,
     pub amount: String,
     pub chain_id: u64,
@@ -36,30 +51,10 @@ pub enum NoteError {
 
 impl Note {
     #[must_use]
-    pub fn new(
-        nullifier: impl Into<Nullifier>,
-        secret: impl Into<Secret>,
-        symbol: impl Into<String>,
-        amount: impl Into<String>,
-        chain_id: u64,
-    ) -> Self {
-        Self {
+    pub fn new(nullifier: impl Into<Nullifier>, secret: impl Into<Secret>) -> Note {
+        Note {
             nullifier: nullifier.into(),
             secret: secret.into(),
-            symbol: symbol.into(),
-            amount: amount.into(),
-            chain_id,
-        }
-    }
-
-    /// Generate a fresh random note for the given pool. Can be used in a deposit transaction.
-    pub fn random(symbol: &str, amount: &str, chain_id: u64, rng: &mut impl CryptoRng) -> Self {
-        Self {
-            nullifier: rng.random(),
-            secret: rng.random(),
-            symbol: symbol.to_string(),
-            amount: amount.to_string(),
-            chain_id,
         }
     }
 
@@ -82,7 +77,33 @@ impl Note {
     }
 }
 
-impl Display for Note {
+impl NoteString {
+    #[must_use]
+    pub fn new(
+        note: Note,
+        symbol: impl Into<String>,
+        amount: impl Into<String>,
+        chain_id: u64,
+    ) -> Self {
+        Self {
+            note,
+            symbol: symbol.into(),
+            amount: amount.into(),
+            chain_id,
+        }
+    }
+}
+
+impl Distribution<Note> for StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Note {
+        Note {
+            nullifier: rng.random(),
+            secret: rng.random(),
+        }
+    }
+}
+
+impl Display for NoteString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -95,7 +116,7 @@ impl Display for Note {
     }
 }
 
-impl FromStr for Note {
+impl FromStr for NoteString {
     type Err = NoteError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -120,7 +141,20 @@ impl FromStr for Note {
         nullifier.copy_from_slice(&bytes[..31]);
         secret.copy_from_slice(&bytes[31..]);
 
-        Ok(Note::new(nullifier, secret, symbol, amount, chain_id))
+        Ok(NoteString::new(
+            Note::new(nullifier, secret),
+            symbol,
+            amount,
+            chain_id,
+        ))
+    }
+}
+
+impl Deref for NoteString {
+    type Target = Note;
+
+    fn deref(&self) -> &Self::Target {
+        &self.note
     }
 }
 
@@ -135,12 +169,13 @@ mod tests {
         let symbol = "eth";
         let amount = "1";
         let chain_id = 1;
-        let note = Note::new(nullifier, secret, symbol, amount, chain_id);
+        let note = NoteString::new(Note::new(nullifier, secret), symbol, amount, chain_id);
         let encoded = note.to_string();
 
-        insta::assert_debug_snapshot!(encoded);
+        let expected = "tornado-eth-1-1-0x0101010101010101010101010101010101010101010101010101010101010102020202020202020202020202020202020202020202020202020202020202";
+        assert_eq!(encoded, expected);
 
-        let decoded_note = Note::from_str(&encoded).unwrap();
+        let decoded_note = NoteString::from_str(&encoded).unwrap();
         assert_eq!(note, decoded_note);
     }
 }

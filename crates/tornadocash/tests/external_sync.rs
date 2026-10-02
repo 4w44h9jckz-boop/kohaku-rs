@@ -1,12 +1,9 @@
 use alloy::primitives::B256;
 #[cfg(feature = "saga-sync")]
-use kohaku_tornadocash::indexer::saga_sync::SagaSyncSyncer;
+use kohaku_tornadocash::syncer::saga_sync::SagaSyncer;
 use kohaku_tornadocash::{
-    indexer::{
-        remote::RemoteSyncer,
-        syncer::{SyncEvent, SyncerBackend},
-    },
     pool::Pool,
+    syncer::{Syncer, event::SyncEvent, remote::RemoteSyncer},
 };
 
 const REMOTE_SYNC_BASE_URL: &str = "https://raw.githubusercontent.com/Robert-MacWha/privacy-protocols/refs/heads/sync-state/tornadocash-sync";
@@ -26,12 +23,12 @@ async fn test_remote_sync_matches_snapshot() -> Result<(), anyhow::Error> {
 #[cfg(feature = "saga-sync")]
 #[ignore = "run with `cargo test --release -- --ignored`"]
 async fn test_saga_sync_matches_snapshot() -> Result<(), anyhow::Error> {
-    assert_matches_snapshot(&SagaSyncSyncer::new(SAGA_SYNC_BASE_URL)).await
+    assert_matches_snapshot(&SagaSyncer::new(SAGA_SYNC_BASE_URL)).await
 }
 
 /// Syncs `target_syncer` over [`FROM_BLOCK`, `TO_BLOCK`) and asserts its reported event log
 /// exactly matches a checked-in snapshot.
-async fn assert_matches_snapshot(target_syncer: &dyn SyncerBackend) -> Result<(), anyhow::Error> {
+async fn assert_matches_snapshot(target_syncer: &dyn Syncer) -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
@@ -39,9 +36,11 @@ async fn assert_matches_snapshot(target_syncer: &dyn SyncerBackend) -> Result<()
         .ok();
 
     let pool = Pool::SEPOLIA_ETHER_01;
-    let events = target_syncer.sync(&pool, FROM_BLOCK, TO_BLOCK).await?;
+    let synced = target_syncer
+        .sync_range(&pool, FROM_BLOCK, TO_BLOCK)
+        .await?;
 
-    let (mut commitments, mut nullifiers) = commitments_and_nullifiers(&events);
+    let (mut commitments, mut nullifiers) = commitments_and_nullifiers(&synced.events);
     commitments.sort();
     nullifiers.sort();
 
@@ -57,7 +56,7 @@ fn commitments_and_nullifiers(events: &[SyncEvent]) -> (Vec<B256>, Vec<B256>) {
     for event in events {
         match event {
             SyncEvent::Deposit(d) => commitments.push(d.commitment),
-            SyncEvent::Withdrawal(w) => nullifiers.push(w.nullifierHash),
+            SyncEvent::Withdrawal(w) => nullifiers.push(w.nullifier_hash),
         }
     }
 

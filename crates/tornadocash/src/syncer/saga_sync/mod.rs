@@ -6,8 +6,8 @@ use self::{
     manifest::Manifest,
 };
 use crate::{
-    indexer::syncer::{SyncEvent, SyncerBackend, SyncerError},
     pool::Pool,
+    syncer::{Snapshot, Syncer, SyncerError},
 };
 
 mod decode;
@@ -17,14 +17,14 @@ mod manifest;
 /// [saga-sync](https://github.com/fatlabsxyz/saga-sync) protocol.
 ///
 /// Fetches the protocol's manifest, verifies each overlapping chunk's sha256 digest against it,
-/// and decodes the chunk's events into [`SyncEvent`]s.
+/// and decodes the chunk's events into [`SyncEvent`](crate::syncer::event::SyncEvent)s.
 ///
 /// Does not currently implement chunk caching or chunk signature verification.
 /// - Chunk caching could be added to reduce redundant network downloads, but is not required for
 ///   this MVP.
 /// - I don't fully buy the benefits of signature verification. Since invalid chunks would result in
 ///   invalid merkle roots, we can detect and skip invalid chunks regardless.
-pub struct SagaSyncSyncer {
+pub struct SagaSyncer {
     client: reqwest::Client,
     base_url: String,
 }
@@ -51,7 +51,7 @@ pub enum SagaSyncError {
     OutOfRange { block: u64, from: u64, to: u64 },
 }
 
-impl SagaSyncSyncer {
+impl SagaSyncer {
     #[must_use]
     pub fn new(base_url: &str) -> Self {
         Self {
@@ -63,59 +63,64 @@ impl SagaSyncSyncer {
 
 #[cfg_attr(native, async_trait::async_trait)]
 #[cfg_attr(wasm, async_trait::async_trait(?Send))]
-impl SyncerBackend for SagaSyncSyncer {
-    async fn latest_block(&self, pool: &Pool) -> Result<u64, SyncerError> {
-        let manifest = self.fetch_manifest().await.map_err(SyncerError::other)?;
-        let key = stream_key(pool);
-
-        Ok(manifest
-            .available_protocols
-            .get(&key)
-            .and_then(manifest::StreamEntry::last_block)
-            .unwrap_or(pool.deployed_block))
+impl Syncer for SagaSyncer {
+    async fn sync_range(
+        &self,
+        pool: &Pool,
+        from_block: u64,
+        to_block: u64,
+    ) -> Result<Snapshot, SyncerError> {
+        self.sync(pool, from_block, to_block)
+            .await
+            .map_err(SyncerError::other)
     }
+}
 
+impl SagaSyncer {
     async fn sync(
         &self,
         pool: &Pool,
         from_block: u64,
         to_block: u64,
-    ) -> Result<Vec<SyncEvent>, SyncerError> {
-        info!("Syncing from {} to {}", from_block, to_block);
-
-        let manifest = self.fetch_manifest().await.map_err(SyncerError::other)?;
+    ) -> Result<Snapshot, SagaSyncError> {
+        let manifest = self.fetch_manifest().await?;
         let key = stream_key(pool);
+
+        let from = from_block.max(pool.deployed_block);
         let Some(entry) = manifest.available_protocols.get(&key) else {
-            return Ok(Vec::new());
+            return Ok(Snapshot {
+                range: from..from,
+                events: Vec::new(),
+            });
         };
+
+        //? Chunk bounds are already half-open, so the last chunk's `to_block` is the exclusive
+        //? end of everything this stream publishes.
+        let published = entry.last_block().unwrap_or(pool.deployed_block);
+        let range = from..to_block.min(published).max(from);
+
+        info!("Syncing from {} to {}", range.start, range.end);
 
         let overlapping = entry
             .chunks
             .iter()
             .chain(entry.hot_head.iter())
-            .filter(|c| c.from_block < to_block && c.to_block > from_block);
+            .filter(|c| c.from_block < range.end && c.to_block > range.start);
 
-        let mut all_events = Vec::new();
+        let mut events = Vec::new();
         for chunk in overlapping {
-            let gz_bytes = self
-                .fetch_chunk_bytes(&chunk.file)
-                .await
-                .map_err(SyncerError::other)?;
+            let gz_bytes = self.fetch_chunk_bytes(&chunk.file).await?;
 
-            let decompressed =
-                verify_and_decompress_chunk(&gz_bytes, chunk).map_err(SyncerError::other)?;
+            let decompressed = verify_and_decompress_chunk(&gz_bytes, chunk)?;
 
-            let events = parse_chunk_events(&decompressed, chunk, from_block..to_block)
-                .map_err(SyncerError::other)?;
+            let decoded = parse_chunk_events(&decompressed, chunk, range.clone())?;
 
-            all_events.extend(events);
+            events.extend(decoded);
         }
 
-        Ok(all_events)
+        Ok(Snapshot { range, events })
     }
-}
 
-impl SagaSyncSyncer {
     async fn fetch_manifest(&self) -> Result<Manifest, SagaSyncError> {
         let bytes = self
             .client

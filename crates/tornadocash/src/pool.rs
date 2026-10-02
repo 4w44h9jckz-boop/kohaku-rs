@@ -1,30 +1,17 @@
-use std::{borrow::Cow, fmt::Display};
+use std::fmt::Display;
 
 use alloy::primitives::{Address, address};
 use serde::{Deserialize, Serialize};
 
-use crate::note::Note;
+use crate::{asset::Asset, note::NoteString};
 
-/// Represents an asset in a tornadocash pool. Assets can either be native (e.g. ETH, MATIC) or
-/// ERC20 tokens.
+/// Represents a tornadocash pool.
 ///
-/// Tornadocash assets are by convention represented by their symbol and decimal precision rather
-/// than their contract addresses.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum Asset {
-    Native {
-        symbol: Cow<'static, str>,
-        decimals: u8,
-    },
-    Erc20 {
-        address: Address,
-        symbol: Cow<'static, str>,
-        decimals: u8,
-    },
-}
-
-/// Represents a tornadocash pool. Pools are uniquely defined by their `chain_id`, `asset` symbol,
-/// and `amount`.
+/// Pools are uniquely defined by their `chain_id`, `asset` symbol, and `amount`.
+///
+/// Defines a set of known Tornado Cash pools as constants. The constants are
+/// named in the format `<CHAIN>_<ASSET>_<AMOUNT>`, e.g. `ETHEREUM_ETHER_01` for
+/// the 0.1 ETH pool on Ethereum mainnet.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Pool {
     pub chain_id: u64,
@@ -32,68 +19,44 @@ pub struct Pool {
     pub asset: Asset,
     pub amount_wei: u128,
     pub deployed_block: u64,
-    pub paymaster_address: Option<Address>,
-    pub adapter_address: Option<Address>,
+
+    pub paymaster: Option<PaymasterInfo>,
 }
 
-/// Hardcoded list of known tornadocash assets.
-pub const ASSETS: &[Asset] = &[Asset::ETH, Asset::MATIC, Asset::DAI];
-
-/// Hardcoded list of known tornadocash pools.
-pub const POOLS: &[Pool] = &[
-    Pool::SEPOLIA_ETHER_01,
-    Pool::SEPOLIA_ETHER_1,
-    Pool::SEPOLIA_ETHER_10,
-    Pool::ETHEREUM_ETHER_01,
-    Pool::ETHEREUM_ETHER_1,
-    Pool::ETHEREUM_ETHER_10,
-    Pool::ETHEREUM_ETHER_100,
-    Pool::POLYGON_MATIC_100,
-    Pool::POLYGON_MATIC_1000,
-];
-
-impl Asset {
-    pub const ETH: Asset = Asset::Native {
-        symbol: Cow::Borrowed("eth"),
-        decimals: 18,
-    };
-
-    pub const MATIC: Asset = Asset::Native {
-        symbol: Cow::Borrowed("matic"),
-        decimals: 18,
-    };
-
-    pub const DAI: Asset = Asset::Erc20 {
-        address: address!("0x6B175474E89094C44Da98b954EedeAC495271d0F"),
-        symbol: Cow::Borrowed("dai"),
-        decimals: 18,
-    };
-
-    #[must_use]
-    pub fn symbol(&self) -> String {
-        match self {
-            Asset::Native { symbol, .. } | Asset::Erc20 { symbol, .. } => symbol.to_string(),
-        }
-    }
-
-    #[must_use]
-    pub fn decimals(&self) -> u8 {
-        match self {
-            Asset::Native { decimals, .. } | Asset::Erc20 { decimals, .. } => *decimals,
-        }
-    }
+/// Privacy-paymaster information for a pool.
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct PaymasterInfo {
+    pub address: Address,
+    pub adapter: Address,
 }
 
 #[allow(clippy::unreadable_literal)]
 impl Pool {
+    /// List of default Tornado Cash pools.
+    pub const POOLS: &[Pool] = &[
+        Pool::SEPOLIA_ETHER_01,
+        Pool::SEPOLIA_ETHER_1,
+        Pool::SEPOLIA_ETHER_10,
+        Pool::ETHEREUM_ETHER_01,
+        Pool::ETHEREUM_ETHER_1,
+        Pool::ETHEREUM_ETHER_10,
+        Pool::ETHEREUM_ETHER_100,
+        Pool::POLYGON_MATIC_100,
+        Pool::POLYGON_MATIC_1000,
+        Pool::ETHEREUM_DAI_100,
+        Pool::ETHEREUM_DAI_1000,
+    ];
+
     pub const SEPOLIA_ETHER_01: Pool = Pool {
         chain_id: 11155111,
         address: address!("0x8C4A04d872a6C1BE37964A21ba3a138525dFF50b"),
         asset: Asset::ETH,
         amount_wei: 10_u128.pow(17),
         deployed_block: 5_594_400,
-        paymaster_address: Some(address!("0x1c5aCCb9c09D72945b79EC986776136bE01d7B2F")),
-        adapter_address: Some(address!("0xa616aAE443FCCABfc2F1EA2Afe001E5046FFDCe0")),
+        paymaster: Some(PaymasterInfo {
+            address: address!("0x1c5aCCb9c09D72945b79EC986776136bE01d7B2F"),
+            adapter: address!("0xa616aAE443FCCABfc2F1EA2Afe001E5046FFDCe0"),
+        }),
     };
 
     pub const SEPOLIA_ETHER_1: Pool = Pool {
@@ -102,8 +65,10 @@ impl Pool {
         asset: Asset::ETH,
         amount_wei: 10_u128.pow(18),
         deployed_block: 5_594_401,
-        paymaster_address: Some(address!("0x1c5aCCb9c09D72945b79EC986776136bE01d7B2F")),
-        adapter_address: Some(address!("0x67a898343F32641206d0f30CB3367944a8919A3A")),
+        paymaster: Some(PaymasterInfo {
+            address: address!("0x1c5aCCb9c09D72945b79EC986776136bE01d7B2F"),
+            adapter: address!("0x67a898343F32641206d0f30CB3367944a8919A3A"),
+        }),
     };
 
     pub const SEPOLIA_ETHER_10: Pool = Pool {
@@ -112,8 +77,7 @@ impl Pool {
         asset: Asset::ETH,
         amount_wei: 10_u128.pow(19),
         deployed_block: 5_594_402,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     };
 
     pub const ETHEREUM_ETHER_01: Pool = Pool {
@@ -122,8 +86,7 @@ impl Pool {
         asset: Asset::ETH,
         amount_wei: 10_u128.pow(17),
         deployed_block: 9116966,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     };
 
     pub const ETHEREUM_ETHER_1: Pool = Pool {
@@ -132,8 +95,7 @@ impl Pool {
         asset: Asset::ETH,
         amount_wei: 10_u128.pow(18),
         deployed_block: 9_117_609,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     };
 
     pub const ETHEREUM_ETHER_10: Pool = Pool {
@@ -142,8 +104,7 @@ impl Pool {
         asset: Asset::ETH,
         amount_wei: 10_u128.pow(19),
         deployed_block: 9_117_720,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     };
 
     pub const ETHEREUM_ETHER_100: Pool = Pool {
@@ -152,28 +113,25 @@ impl Pool {
         asset: Asset::ETH,
         amount_wei: 10_u128.pow(20),
         deployed_block: 9_161_895,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     };
 
     pub const ETHEREUM_DAI_100: Pool = Pool {
         chain_id: 1,
         address: address!("0xD4B88Df4D29F5CedD6857912842cff3b20C8Cfa3"),
-        asset: Asset::DAI,
+        asset: Asset::ETHEREUM_DAI,
         amount_wei: 10_u128.pow(20),
         deployed_block: 9_117_612,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     };
 
     pub const ETHEREUM_DAI_1000: Pool = Pool {
         chain_id: 1,
         address: address!("0xFD8610d20aA15b7B2E3Be39B396a1bC3516c7144"),
-        asset: Asset::DAI,
+        asset: Asset::ETHEREUM_DAI,
         amount_wei: 10_u128.pow(21),
         deployed_block: 9_161_917,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     };
 
     pub const POLYGON_MATIC_100: Pool = Pool {
@@ -182,8 +140,7 @@ impl Pool {
         asset: Asset::MATIC,
         amount_wei: 10_u128.pow(20),
         deployed_block: 16_258_013,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     };
 
     pub const POLYGON_MATIC_1000: Pool = Pool {
@@ -192,28 +149,29 @@ impl Pool {
         asset: Asset::MATIC,
         amount_wei: 10_u128.pow(21),
         deployed_block: 16_258_032,
-        paymaster_address: None,
-        adapter_address: None,
+        paymaster: None,
     };
 
+    /// Creates a pool from the note's pool hints. Returns `None` if the note's pool is not known.
     #[must_use]
-    pub fn from_note(note: &Note) -> Option<Self> {
-        Self::from_raw(&note.amount, &note.symbol, note.chain_id)
-    }
-
-    #[must_use]
-    pub fn from_raw(amount: &str, symbol: &str, chain_id: u64) -> Option<Self> {
-        POOLS
+    pub fn from_note(note: &NoteString) -> Option<Self> {
+        Pool::POOLS
             .iter()
             .find(|pool| {
-                pool.chain_id == chain_id && pool.symbol() == symbol && pool.amount() == amount
+                pool.chain_id == note.chain_id
+                    && pool.symbol() == note.symbol
+                    && pool.amount() == note.amount
             })
             .cloned()
     }
 
+    /// Creates a pool from the provided address. Returns `None` if the pool is not known.
     #[must_use]
     pub fn from_address(address: Address) -> Option<Self> {
-        POOLS.iter().find(|pool| pool.address == address).cloned()
+        Pool::POOLS
+            .iter()
+            .find(|pool| pool.address == address)
+            .cloned()
     }
 
     /// Pool ID, e.g. "eth-0.1-1" for the 0.1 ETH pool on Ethereum mainnet.
@@ -224,18 +182,14 @@ impl Pool {
 
     /// Pool asset symbol, e.g. "eth" or "matic"
     #[must_use]
-    pub fn symbol(&self) -> String {
+    pub fn symbol(&self) -> &str {
         self.asset.symbol()
     }
 
     /// Decimal amount as a string, e.g. "0.1"
     #[must_use]
     pub fn amount(&self) -> String {
-        let decimals = match &self.asset {
-            Asset::Native { decimals, .. } | Asset::Erc20 { decimals, .. } => *decimals,
-        };
-
-        format_amount(self.amount_wei, decimals)
+        format_amount(self.amount_wei, self.asset.decimals())
     }
 }
 

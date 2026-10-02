@@ -1,4 +1,8 @@
-use std::str::FromStr;
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    sync::{LazyLock, RwLock},
+};
 
 use ark_bn254::Fr;
 use ark_ff::{AdditiveGroup, Field};
@@ -90,13 +94,25 @@ fn segment_scalar(bits: &[bool]) -> BigInt {
     escalar
 }
 
+fn get_base_point(point_idx: usize) -> Point {
+    static CACHE: LazyLock<RwLock<HashMap<usize, Point>>> =
+        LazyLock::new(|| RwLock::new(HashMap::new()));
+
+    if let Some(p) = CACHE.read().unwrap().get(&point_idx) {
+        return p.clone();
+    }
+
+    let p = compute_base_point(point_idx);
+    CACHE.write().unwrap().entry(point_idx).or_insert(p).clone()
+}
+
 /// Derive the s-th Pedersen generator point.
 ///
 /// Hashes the string `"PedersenGenerator_{s:032}_{try:032}"` with Blake-256,
 /// clears the 254th bit (circomlib convention), unpacks the resulting bytes as
 /// a `BabyJubJub` point, multiplies by 8 to clear the cofactor, and returns the
 /// first such point that lies in the prime-order subgroup.
-fn get_base_point(point_idx: usize) -> Point {
+fn compute_base_point(point_idx: usize) -> Point {
     for try_idx in 0.. {
         let seed = format!("PedersenGenerator_{point_idx:032}_{try_idx:032}");
         let mut h = blake256(seed.as_bytes());
