@@ -44,7 +44,7 @@ impl SagaEvent {
             Some(&Tornado::Deposit::SIGNATURE_HASH) => {
                 let decoded = Tornado::Deposit::decode_raw_log(self.topics.iter().copied(), &data)?;
                 Ok(Some(SyncEvent::Deposit(Deposit {
-                    commitment: decoded.commitment,
+                    commitment: decoded.commitment.try_into()?,
                     leaf_index: decoded.leafIndex,
                     block_number: self.block_number,
                 })))
@@ -54,7 +54,7 @@ impl SagaEvent {
                     Tornado::Withdrawal::decode_raw_log(self.topics.iter().copied(), &data)?;
                 Ok(Some(SyncEvent::Withdrawal(Withdrawal {
                     to: decoded.to,
-                    nullifier_hash: decoded.nullifierHash,
+                    nullifier_hash: decoded.nullifierHash.try_into()?,
                     relayer: decoded.relayer,
                     fee: decoded.fee,
                     block_number: self.block_number,

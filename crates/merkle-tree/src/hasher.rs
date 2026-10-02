@@ -1,15 +1,13 @@
-use ruint::aliases::U256;
-
 /// A merkle tree hash function.
 ///
 /// The hash function should be collision-resistant and deterministic. It's
-/// used to hash a pair of nodes into a parent node, and to provide the zero
+/// used to hash a node's children into a parent node, and to provide the zero
 /// value for empty leaves.
-pub trait Hasher: Clone {
-    /// Hashes two 32-byte arrays into a 32-byte hash.
-    fn hash(a: U256, b: U256) -> U256;
+pub trait Hasher<const ARITY: usize, E>: Clone {
+    /// Hashes a node's children into its parent hash.
+    fn hash(children: [E; ARITY]) -> E;
 
     /// Returns the zero value for the hash function, which is used as a placeholder for empty
     /// leaves in the Merkle tree.
-    fn zero() -> U256;
+    fn zero() -> E;
 }

@@ -12,7 +12,8 @@ use ruint::aliases::U256;
 use websnark_rs::proof::Proof;
 
 use crate::{
-    abis::tornado::Tornado::withdrawCall, merkle_tree::MerkleProof, note::Note, pool::Pool,
+    abis::tornado::Tornado::withdrawCall, field::Field, merkle_tree::MerkleProof, note::Note,
+    pool::Pool,
 };
 
 /// A Tornado Cash withdrawal.
@@ -27,7 +28,7 @@ pub struct Withdrawal {
 /// A proven Tornado Cash withdrawal.
 #[derive(Debug, Clone)]
 pub struct ProvenWithdrawal {
-    pub root: U256,
+    pub root: Field,
     pub proof: Proof,
     pub inner: Withdrawal,
 }
@@ -45,7 +46,7 @@ pub enum WithdrawalError {
     #[error("Circuit error: {0}")]
     Circuit(#[from] kohaku_tornadocash_circuit::CircuitError),
     #[error("Proof leaf mismatch: expected {expected}, got {actual}")]
-    ProofLeafMismatch { expected: U256, actual: U256 },
+    ProofLeafMismatch { expected: Field, actual: Field },
 }
 
 impl Withdrawal {
@@ -84,12 +85,13 @@ impl Withdrawal {
             });
         }
 
-        let path_elements = merkle_proof.siblings;
+        let path_elements = merkle_proof.sibling_paths();
+        let path_elements = from_fn(|i| path_elements[i].into());
         let path_indices = from_fn(|i| U256::from(merkle_proof.path[i]));
 
         let circuit_inputs = CircuitInputs::new(
-            merkle_proof.root,
-            self.note.nullifier_hash(),
+            merkle_proof.root.into(),
+            self.note.nullifier_hash().into(),
             self.recipient.into_word().into(),
             self.payer.address.into_word().into(),
             self.payer.fee,

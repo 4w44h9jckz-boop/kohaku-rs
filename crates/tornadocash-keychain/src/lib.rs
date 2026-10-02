@@ -1,7 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use kohaku_tornadocash::{Deposit, NoteString, pool::Pool};
-use ruint::aliases::U256;
+use kohaku_tornadocash::{Deposit, NoteString, field::Field, pool::Pool};
 use thiserror::Error;
 
 mod dyn_keychain;
@@ -27,7 +26,7 @@ pub trait Keychain: Send + Sync {
     ///
     /// # Errors
     /// Returns an error if the material cannot be derived.
-    async fn commitment(&self, pool: &Pool, nonce: u64) -> Result<U256, KeychainError> {
+    async fn commitment(&self, pool: &Pool, nonce: u64) -> Result<Field, KeychainError> {
         let note = self.note(pool, nonce).await?;
         Ok(note.commitment())
     }
@@ -36,7 +35,7 @@ pub trait Keychain: Send + Sync {
     ///
     /// # Errors
     /// Returns an error if the material cannot be derived.
-    async fn nullifier_hash(&self, pool: &Pool, nonce: u64) -> Result<U256, KeychainError> {
+    async fn nullifier_hash(&self, pool: &Pool, nonce: u64) -> Result<Field, KeychainError> {
         let note = self.note(pool, nonce).await?;
         Ok(note.nullifier_hash())
     }

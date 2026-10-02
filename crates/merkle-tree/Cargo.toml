@@ -3,15 +3,16 @@ name = "kohaku-merkle-tree"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+parallel = ["dep:rayon"]
+
 [dependencies]
-async-trait = { workspace = true }
+rayon = { workspace = true, optional = true }
 thiserror = { workspace = true }
-ruint = { workspace = true }
-kohaku-kv-store = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-criterion = { workspace = true, features = ["async_tokio"] }
+criterion = { workspace = true }
 rand = { workspace = true }
 
 [[bench]]

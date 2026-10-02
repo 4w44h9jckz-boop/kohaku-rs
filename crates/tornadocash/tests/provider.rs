@@ -4,7 +4,6 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use kohaku_fork_kit::pool::deploy_pool;
-use kohaku_kv_store::Store;
 use kohaku_tornadocash::{
     deposit::Deposit,
     merkle_tree::{MerkleTree, MerkleTreeExt},
@@ -65,13 +64,13 @@ async fn test_withdraw() -> Result<(), anyhow::Error> {
     let syncer = RpcSyncer::new(provider.clone());
 
     // Sync a Merkle tree against the provider
-    let tree = MerkleTree::new(Store::create());
+    let mut tree = MerkleTree::new();
     let snapshot = syncer.sync(&pool, ..).await?;
-    tree.splice_events(&snapshot.events).await?;
+    tree.splice_events(&snapshot.events)?;
 
     // Withdraw the note
     let recipient: Address = PrivateKeySigner::random().address();
-    let merkle_proof = tree.leaf_proof(note.commitment()).await?;
+    let merkle_proof = tree.leaf_proof(note.commitment())?;
     let withdrawal =
         Withdrawal::new(&pool, note, recipient).prove(&merkle_proof, &mut rand::rng())?;
     provider

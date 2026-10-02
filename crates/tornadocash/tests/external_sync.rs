@@ -55,8 +55,8 @@ fn commitments_and_nullifiers(events: &[SyncEvent]) -> (Vec<B256>, Vec<B256>) {
 
     for event in events {
         match event {
-            SyncEvent::Deposit(d) => commitments.push(d.commitment),
-            SyncEvent::Withdrawal(w) => nullifiers.push(w.nullifier_hash),
+            SyncEvent::Deposit(d) => commitments.push(d.commitment.into()),
+            SyncEvent::Withdrawal(w) => nullifiers.push(w.nullifier_hash.into()),
         }
     }
 

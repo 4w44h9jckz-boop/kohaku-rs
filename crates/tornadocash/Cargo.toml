@@ -47,7 +47,6 @@ kohaku-tornadocash-circuit = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
-kohaku-kv-store = { workspace = true }
 alloy = { workspace = true, features = [
     "signers",
     "signer-local",

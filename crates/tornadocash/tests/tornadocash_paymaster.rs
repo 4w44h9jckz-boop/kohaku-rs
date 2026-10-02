@@ -11,7 +11,6 @@ use kohaku_fork_kit::{
     pool::deploy_pool,
     simple_account::deploy_simple_account,
 };
-use kohaku_kv_store::Store;
 use kohaku_tornadocash::{
     deposit::Deposit,
     merkle_tree::{MerkleTree, MerkleTreeExt},
@@ -81,9 +80,9 @@ async fn test_tornadocash_paymaster() -> Result<(), anyhow::Error> {
 
     // Sync a Merkle tree against the provider
     let syncer = RpcSyncer::new(provider.clone());
-    let tree = MerkleTree::new(Store::create());
+    let mut tree = MerkleTree::new();
     let snapshot = syncer.sync(&pool, ..).await?;
-    tree.splice_events(&snapshot.events).await?;
+    tree.splice_events(&snapshot.events)?;
 
     info!("Starting local alto bundler");
     let alto = AltoBuilder::new(
@@ -110,7 +109,7 @@ async fn test_tornadocash_paymaster() -> Result<(), anyhow::Error> {
         }]);
 
     let withdrawal = Withdrawal::new(&pool, note.clone(), owner.address());
-    let withdrawal_merkle_proof = tree.leaf_proof(withdrawal.note.commitment()).await?;
+    let withdrawal_merkle_proof = tree.leaf_proof(withdrawal.note.commitment())?;
     let builder = builder
         .with_tornado_paymaster(
             withdrawal,
@@ -183,9 +182,9 @@ async fn test_tornadocash_paymaster_flashcall() -> Result<(), anyhow::Error> {
 
     // Sync a Merkle tree against the provider
     let syncer = RpcSyncer::new(provider.clone());
-    let tree = MerkleTree::new(Store::create());
+    let mut tree = MerkleTree::new();
     let snapshot = syncer.sync(&pool, ..).await?;
-    tree.splice_events(&snapshot.events).await?;
+    tree.splice_events(&snapshot.events)?;
 
     info!("Starting local alto bundler");
     let alto = AltoBuilder::new(
@@ -216,7 +215,7 @@ async fn test_tornadocash_paymaster_flashcall() -> Result<(), anyhow::Error> {
 
     info!("Withdrawing {spend} wei and spending it in the same operation");
     let withdrawal = Withdrawal::new(&pool, note, owner.address());
-    let withdrawal_merkle_proof = tree.leaf_proof(withdrawal.note.commitment()).await?;
+    let withdrawal_merkle_proof = tree.leaf_proof(withdrawal.note.commitment())?;
     let builder = builder
         .with_tornado_paymaster(
             withdrawal,

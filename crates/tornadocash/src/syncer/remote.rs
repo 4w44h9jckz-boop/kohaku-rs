@@ -46,6 +46,8 @@ pub enum RemoteSyncerError {
     HttpError(#[from] reqwest::Error),
     #[error("Serde error: {0}")]
     JsonError(#[from] serde_json::Error),
+    #[error("Field conversion error: {0}")]
+    Field(#[from] crate::field::NotInRangeError),
 }
 
 impl RemoteSyncer {
@@ -93,13 +95,13 @@ impl RemoteSyncer {
         let deposits: Vec<SyncEvent> = deposits
             .into_iter()
             .filter(|d| range.contains(&d.block_number))
-            .map(Into::into)
-            .collect();
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()?;
         let withdrawals: Vec<SyncEvent> = withdrawals
             .into_iter()
             .filter(|n| range.contains(&n.block_number))
-            .map(Into::into)
-            .collect();
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()?;
 
         let events = deposits.into_iter().chain(withdrawals).collect();
 
@@ -143,25 +145,29 @@ impl RemoteSyncer {
     }
 }
 
-impl From<RemoteDeposit> for SyncEvent {
-    fn from(remote: RemoteDeposit) -> Self {
-        SyncEvent::Deposit(Deposit {
-            commitment: remote.commitment,
+impl TryFrom<RemoteDeposit> for SyncEvent {
+    type Error = RemoteSyncerError;
+
+    fn try_from(remote: RemoteDeposit) -> Result<Self, Self::Error> {
+        Ok(SyncEvent::Deposit(Deposit {
+            commitment: remote.commitment.try_into()?,
             leaf_index: remote.leaf_index,
             block_number: remote.block_number,
-        })
+        }))
     }
 }
 
-impl From<RemoteWithdrawal> for SyncEvent {
-    fn from(remote: RemoteWithdrawal) -> Self {
-        SyncEvent::Withdrawal(Withdrawal {
+impl TryFrom<RemoteWithdrawal> for SyncEvent {
+    type Error = RemoteSyncerError;
+
+    fn try_from(remote: RemoteWithdrawal) -> Result<Self, Self::Error> {
+        Ok(SyncEvent::Withdrawal(Withdrawal {
             to: remote.to,
-            nullifier_hash: remote.nullifier,
+            nullifier_hash: remote.nullifier.try_into()?,
             relayer: Address::ZERO,
             fee: remote.fee,
             block_number: remote.block_number,
-        })
+        }))
     }
 }
 

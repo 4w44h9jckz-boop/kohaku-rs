@@ -4,12 +4,11 @@ use rand::{
     RngExt,
     distr::{Distribution, StandardUniform},
 };
-use ruint::aliases::U256;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use crate::note::secrets::{Nullifier, Secret};
-use crate::{Pool, crypto::pedersen::pedersen_hash};
+use crate::{Pool, crypto::pedersen::pedersen_hash, field::Field};
 
 mod secrets;
 
@@ -67,13 +66,13 @@ impl Note {
     }
 
     #[must_use]
-    pub fn commitment(&self) -> U256 {
-        pedersen_hash(&self.preimage())
+    pub fn commitment(&self) -> Field {
+        pedersen_hash(&self.preimage()).into()
     }
 
     #[must_use]
-    pub fn nullifier_hash(&self) -> U256 {
-        pedersen_hash(self.nullifier.as_bytes())
+    pub fn nullifier_hash(&self) -> Field {
+        pedersen_hash(self.nullifier.as_bytes()).into()
     }
 }
 

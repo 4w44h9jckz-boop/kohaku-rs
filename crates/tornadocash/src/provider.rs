@@ -1,14 +1,14 @@
 use alloy::providers::Provider;
 use ruint::aliases::U256;
 
-use crate::{abis::tornado::Tornado, asset::Asset, pool::Pool};
+use crate::{abis::tornado::Tornado, asset::Asset, field::Field, pool::Pool};
 
 pub trait TornadoProviderExt: Provider {
     /// Indicates whether `nullifier_hash` has been spent.
     fn is_spent(
         &self,
         pool: &Pool,
-        nullifier_hash: U256,
+        nullifier_hash: Field,
     ) -> impl Future<Output = Result<bool, alloy::contract::Error>>;
 
     /// Indicates whether each of `nullifier_hashes` has been spent.
@@ -17,14 +17,14 @@ pub trait TornadoProviderExt: Provider {
     fn is_spent_array(
         &self,
         pool: &Pool,
-        nullifier_hashes: &[U256],
+        nullifier_hashes: &[Field],
     ) -> impl Future<Output = Result<Vec<bool>, alloy::contract::Error>>;
 
     /// Indicates whether `root` is known to the Tornado pool.
     fn is_known_root(
         &self,
         pool: &Pool,
-        root: U256,
+        root: Field,
     ) -> impl Future<Output = Result<bool, alloy::contract::Error>>;
 
     /// Returns the amount of fee token equivalent to the given `wei_amount`.
@@ -41,7 +41,7 @@ impl<P: Provider> TornadoProviderExt for P {
     async fn is_spent(
         &self,
         pool: &Pool,
-        nullifier_hash: U256,
+        nullifier_hash: Field,
     ) -> Result<bool, alloy::contract::Error> {
         Tornado::new(pool.address, self)
             .isSpent(nullifier_hash.into())
@@ -52,7 +52,7 @@ impl<P: Provider> TornadoProviderExt for P {
     async fn is_spent_array(
         &self,
         pool: &Pool,
-        nullifier_hashes: &[U256],
+        nullifier_hashes: &[Field],
     ) -> Result<Vec<bool>, alloy::contract::Error> {
         let hashes: Vec<_> = nullifier_hashes.iter().map(|&h| h.into()).collect();
         Tornado::new(pool.address, self)
@@ -61,7 +61,11 @@ impl<P: Provider> TornadoProviderExt for P {
             .await
     }
 
-    async fn is_known_root(&self, pool: &Pool, root: U256) -> Result<bool, alloy::contract::Error> {
+    async fn is_known_root(
+        &self,
+        pool: &Pool,
+        root: Field,
+    ) -> Result<bool, alloy::contract::Error> {
         Tornado::new(pool.address, self)
             .isKnownRoot(root.into())
             .call()

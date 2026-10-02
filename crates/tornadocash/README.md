@@ -39,7 +39,6 @@ use alloy::{
     primitives::Address,
     providers::{DynProvider, Provider},
 };
-use kohaku_kv_store::Store;
 use kohaku_tornadocash::{
     merkle_tree::{MerkleTree, MerkleTreeExt},
     Note,
@@ -56,11 +55,11 @@ async fn example(
     recipient: Address,
     rng: &mut impl rand::CryptoRng,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let tree = MerkleTree::new(Store::create());
+    let mut tree = MerkleTree::new();
     let snapshot = syncer.sync(&pool, ..).await?;
-    tree.splice_events(&snapshot.events).await?;
+    tree.splice_events(&snapshot.events)?;
 
-    let merkle_proof = tree.leaf_proof(note.commitment()).await?;
+    let merkle_proof = tree.leaf_proof(note.commitment())?;
     let withdrawal = Withdrawal::new(&pool, note, recipient)
         .prove(&merkle_proof, rng)?;
 
@@ -76,6 +75,7 @@ async fn example(
 use alloy::{
     primitives::{Address, U256},
     providers::{DynProvider, Provider},
+};
 use kohaku_tornadocash::{merkle_tree::MerkleTree, Note, Pool, Relayer, Withdrawal};
 
 async fn example(
@@ -90,7 +90,7 @@ async fn example(
 
     let status = relayer.status().await?;
     let gas_price = provider.get_gas_price().await?;
-    let merkle_proof = tree.leaf_proof(note.commitment()).await?;
+    let merkle_proof = tree.leaf_proof(note.commitment())?;
 
     let withdrawal = Withdrawal::new(&pool, note, recipient)
         .with_payer(status.quote(&pool, gas_price, U256::ZERO)?)
@@ -139,7 +139,7 @@ async fn example(
 
     // The note pays for gas, and its remainder is withdrawn to `owner` during validation, so the
     // operation's own calls can spend it.
-    let withdrawal_merkle_proof = tree.leaf_proof(note.commitment()).await?;
+    let withdrawal_merkle_proof = tree.leaf_proof(note.commitment())?;
     let withdrawal = Withdrawal::new(&pool, note, owner.address());
     let builder = builder
         .with_tornado_paymaster(withdrawal, &withdrawal_merkle_proof, &provider, &bundler, rng)

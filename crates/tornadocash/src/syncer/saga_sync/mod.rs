@@ -49,6 +49,8 @@ pub enum SagaSyncError {
     OutOfOrder { index: usize },
     #[error("Event at block {block} outside chunk range [{from}, {to})")]
     OutOfRange { block: u64, from: u64, to: u64 },
+    #[error("Field conversion error: {0}")]
+    Field(#[from] crate::field::NotInRangeError),
 }
 
 impl SagaSyncer {

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use kohaku_tornadocash::{
+    field::Field,
     pool::Pool,
     syncer::event::{self, SyncEvent},
 };
-use ruint::aliases::U256;
 
 use crate::{Keychain, KeychainError};
 
@@ -90,24 +90,22 @@ pub async fn recover(
 }
 
 /// Indexes the deposits in `events` by commitment.
-fn deposits(events: &[SyncEvent]) -> HashMap<U256, &event::Deposit> {
+fn deposits(events: &[SyncEvent]) -> HashMap<Field, &event::Deposit> {
     events
         .iter()
         .filter_map(|event| match event {
-            SyncEvent::Deposit(deposit) => Some((deposit.commitment.into(), deposit)),
+            SyncEvent::Deposit(deposit) => Some((deposit.commitment, deposit)),
             SyncEvent::Withdrawal(_) => None,
         })
         .collect()
 }
 
 /// Indexes the withdrawals in `events` by nullifier hash.
-fn withdrawals(events: &[SyncEvent]) -> HashMap<U256, &event::Withdrawal> {
+fn withdrawals(events: &[SyncEvent]) -> HashMap<Field, &event::Withdrawal> {
     events
         .iter()
         .filter_map(|event| match event {
-            SyncEvent::Withdrawal(withdrawal) => {
-                Some((withdrawal.nullifier_hash.into(), withdrawal))
-            }
+            SyncEvent::Withdrawal(withdrawal) => Some((withdrawal.nullifier_hash, withdrawal)),
             SyncEvent::Deposit(_) => None,
         })
         .collect()
@@ -115,7 +113,7 @@ fn withdrawals(events: &[SyncEvent]) -> HashMap<U256, &event::Withdrawal> {
 
 #[cfg(test)]
 mod tests {
-    use alloy::primitives::Address;
+    use alloy::primitives::{Address, U256};
     use kohaku_tornadocash::{
         Note, NoteString,
         note::{Nullifier, Secret},
@@ -215,7 +213,7 @@ mod tests {
 
     fn deposit(note: &Note, leaf_index: u32) -> SyncEvent {
         SyncEvent::Deposit(event::Deposit {
-            commitment: note.commitment().into(),
+            commitment: note.commitment(),
             leaf_index,
             block_number: 0,
         })
@@ -224,7 +222,7 @@ mod tests {
     fn withdrawal(note: &Note) -> SyncEvent {
         SyncEvent::Withdrawal(event::Withdrawal {
             to: Address::ZERO,
-            nullifier_hash: note.nullifier_hash().into(),
+            nullifier_hash: note.nullifier_hash(),
             relayer: Address::ZERO,
             fee: U256::ZERO,
             block_number: 0,

@@ -1,50 +1,62 @@
+use std::hint::black_box;
+
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use kohaku_kv_store::memory::MemoryStore;
 use kohaku_merkle_tree::{MerkleTree, hasher::Hasher};
 use rand::RngExt;
-use ruint::aliases::U256;
+
+type Tree = MerkleTree<20, 2, u64, BenchHasher>;
 
 #[derive(Copy, Clone)]
 struct BenchHasher;
 
-impl Hasher for BenchHasher {
-    fn hash(a: U256, b: U256) -> U256 {
-        a ^ b.rotate_left(1)
+impl Hasher<2, u64> for BenchHasher {
+    fn hash(children: [u64; 2]) -> u64 {
+        let mut state = children[0] ^ children[1].rotate_left(1);
+        for i in 0..1024 {
+            state = state.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(29) ^ i;
+        }
+        state
     }
 
-    fn zero() -> U256 {
-        U256::ZERO
+    fn zero() -> u64 {
+        0
     }
 }
 
-type Tree = MerkleTree<20, BenchHasher>;
-
-fn random_leaves(n: usize) -> Vec<U256> {
+fn random_leaves(n: usize) -> Vec<u64> {
     let mut rng = rand::rng();
-    (0..n)
-        .map(|_| {
-            let mut bytes = [0u8; 32];
-            rng.fill(&mut bytes);
-            U256::from_be_bytes(bytes)
-        })
-        .collect()
+    (0..n).map(|_| rng.random()).collect()
 }
 
-/// Benchmark the time taken to insert `n` leaves into the MerkleTree, for various values of `n`.
 fn bench_insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("merkle_insert");
-    let rt = tokio::runtime::Runtime::new().unwrap();
 
     for n in [100, 10_000] {
         let leaves = random_leaves(n);
 
-        group.bench_with_input(BenchmarkId::from_parameter(n), &leaves, |b, leaves| {
-            b.to_async(&rt).iter(|| {
-                let tree = Tree::new(MemoryStore::new().into());
-                async move {
-                    tree.splice(0, leaves)
-                        .await
-                        .expect("Failed to insert leaves");
+        group.bench_function(BenchmarkId::from_parameter(n), |b| {
+            b.iter(|| {
+                let mut tree = Tree::new();
+                black_box(tree.splice(0, &leaves).expect("Failed to insert leaves"));
+            });
+        });
+    }
+
+    group.finish();
+}
+
+fn bench_proof(c: &mut Criterion) {
+    let mut group = c.benchmark_group("merkle_proof");
+
+    for n in [100, 10_000] {
+        let leaves = random_leaves(n);
+        let mut tree = Tree::new();
+        tree.splice(0, &leaves).expect("Failed to insert leaves");
+
+        group.bench_function(BenchmarkId::from_parameter(n), |b| {
+            b.iter(|| {
+                for i in 0..n {
+                    black_box(tree.proof(i).expect("Failed to generate proof"));
                 }
             });
         });
@@ -53,5 +65,5 @@ fn bench_insert(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_insert);
+criterion_group!(benches, bench_insert, bench_proof);
 criterion_main!(benches);

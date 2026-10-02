@@ -10,10 +10,10 @@ use alloy::{
 };
 use kohaku_tornadocash::{
     Note, NoteString,
+    field::Field,
     note::{Nullifier, Secret},
     pool::Pool,
 };
-use ruint::aliases::U256;
 
 use crate::{Keychain, KeychainError};
 
@@ -38,8 +38,8 @@ pub struct SignatureKeychain<S: Signer + Send + Sync> {
 
 #[derive(Clone, Copy)]
 struct Derived {
-    commitment: U256,
-    nullifier_hash: U256,
+    commitment: Field,
+    nullifier_hash: Field,
 }
 
 impl<S: Signer + Send + Sync> SignatureKeychain<S> {
@@ -87,11 +87,11 @@ impl<S: Signer + Send + Sync> Keychain for SignatureKeychain<S> {
         ))
     }
 
-    async fn commitment(&self, pool: &Pool, nonce: u64) -> Result<U256, KeychainError> {
+    async fn commitment(&self, pool: &Pool, nonce: u64) -> Result<Field, KeychainError> {
         Ok(self.derived(pool, nonce).await?.commitment)
     }
 
-    async fn nullifier_hash(&self, pool: &Pool, nonce: u64) -> Result<U256, KeychainError> {
+    async fn nullifier_hash(&self, pool: &Pool, nonce: u64) -> Result<Field, KeychainError> {
         Ok(self.derived(pool, nonce).await?.nullifier_hash)
     }
 }
@@ -139,7 +139,7 @@ impl From<alloy::signers::Error> for KeychainError {
 
 #[cfg(test)]
 mod tests {
-    use alloy::signers::local::LocalSigner;
+    use alloy::{primitives::U256, signers::local::LocalSigner};
 
     use super::*;
 

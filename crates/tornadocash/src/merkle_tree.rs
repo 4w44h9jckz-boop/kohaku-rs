@@ -2,30 +2,25 @@ use std::sync::OnceLock;
 
 use alloy::primitives::keccak256;
 use ark_bn254::Fr;
-use ark_ff::{BigInt, PrimeField};
+use ark_ff::PrimeField;
 use kohaku_merkle_tree::{MerkleTreeError, hasher::Hasher};
-use ruint::{aliases::U256, uint};
 
 use crate::{
     crypto::mimc::mimc_sponge_hash,
+    field::Field,
     syncer::event::{Deposit, SyncEvent},
 };
 
-const DEPTH: usize = 20;
-
 /// `MerkleTree` type used in Tornado Cash.
-pub type MerkleTree = kohaku_merkle_tree::MerkleTree<DEPTH, TornadoHasher>;
+pub type MerkleTree = kohaku_merkle_tree::MerkleTree<20, 2, Field, TornadoHasher>;
 
 /// `MerkleProof` type used in Tornado Cash.
-pub type MerkleProof = kohaku_merkle_tree::proof::MerkleProof<DEPTH>;
+pub type MerkleProof = kohaku_merkle_tree::proof::MerkleProof<20, 2, Field>;
 
 /// `MerkleTree` extension trait for Tornado Cash.
 pub trait MerkleTreeExt {
     /// Splices the given events into the Merkle tree.
-    fn splice_events(
-        &self,
-        events: &[SyncEvent],
-    ) -> impl Future<Output = Result<(), MerkleTreeError>>;
+    fn splice_events(&mut self, events: &[SyncEvent]) -> Result<(), MerkleTreeError>;
 }
 
 /// Hasher used in Tornado Cash Merkle tree.
@@ -35,28 +30,22 @@ pub trait MerkleTreeExt {
 #[derive(Copy, Clone)]
 pub struct TornadoHasher;
 
-const FIELD_SIZE: U256 =
-    uint!(21888242871839275222246405745257275088548364400416034343698204186575808495617_U256);
-
-impl Hasher for TornadoHasher {
-    fn hash(l: U256, r: U256) -> U256 {
-        let l: Fr = BigInt::from(l).into();
-        let r: Fr = BigInt::from(r).into();
-        mimc_sponge_hash(l, r).into_bigint().into()
+impl Hasher<2, Field> for TornadoHasher {
+    fn hash(children: [Field; 2]) -> Field {
+        mimc_sponge_hash(children[0].into(), children[1].into()).into()
     }
 
-    fn zero() -> U256 {
-        static ZERO: OnceLock<U256> = OnceLock::new();
+    fn zero() -> Field {
+        static ZERO: OnceLock<Field> = OnceLock::new();
         *ZERO.get_or_init(|| {
             let hash = keccak256(b"tornado");
-            let hash_u256 = U256::from_be_bytes(*hash);
-            hash_u256 % FIELD_SIZE
+            Fr::from_be_bytes_mod_order(hash.as_slice()).into()
         })
     }
 }
 
 impl MerkleTreeExt for MerkleTree {
-    async fn splice_events(&self, events: &[SyncEvent]) -> Result<(), MerkleTreeError> {
+    fn splice_events(&mut self, events: &[SyncEvent]) -> Result<(), MerkleTreeError> {
         let deposits: Vec<&Deposit> = events
             .iter()
             .filter_map(|e| match e {
@@ -79,7 +68,60 @@ impl MerkleTreeExt for MerkleTree {
             }
         }
 
-        let commitments: Vec<U256> = deposits.into_iter().map(|d| d.commitment.into()).collect();
-        self.splice(first_leaf_index as usize, &commitments).await
+        let commitments: Vec<Field> = deposits.into_iter().map(|d| d.commitment).collect();
+        self.splice(first_leaf_index as usize, &commitments)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::array::from_fn;
+
+    use alloy::primitives::U256;
+    use ruint::uint;
+
+    use super::*;
+
+    #[test]
+    fn zero_hash_is_deterministic() {
+        // https://etherscan.io/address/0x910cbd523d972eb0a6f4cae4618ad62622b39dbf#readContract#F17
+        let zero: U256 = TornadoHasher::zero().into();
+        let expected = uint!(
+            21663839004416932945382355908790599225266501822907911457504978515578255421292_U256
+        );
+
+        assert_eq!(zero, expected);
+    }
+
+    #[test]
+    fn hash_is_deterministic() {
+        // https://etherscan.io/address/0x910cbd523d972eb0a6f4cae4618ad62622b39dbf#readContract#F3
+        let l = uint!(0x0000000000000000000000000000000000000000000000000000000000000001_U256)
+            .try_into()
+            .unwrap();
+        let r = uint!(0x0000000000000000000000000000000000000000000000000000000000000002_U256)
+            .try_into()
+            .unwrap();
+
+        let hash: U256 = TornadoHasher::hash([l, r]).into();
+        let expected = uint!(
+            19814528709687996974327303300007262407299502847885145507292406548098437687919_U256
+        );
+
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn splice_is_deterministic() {
+        let mut tree = crate::merkle_tree::MerkleTree::new();
+
+        let leaves: [Field; 10] = from_fn(|i| Field::from(i + 1));
+        tree.splice(0, &leaves).unwrap();
+
+        let root: U256 = tree.root().unwrap().into();
+        let expected = uint!(
+            15200063891796499502721825879098395282261979630510984497744981505913469850275_U256
+        );
+        assert_eq!(root, expected);
     }
 }

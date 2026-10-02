@@ -9,13 +9,11 @@
 //! the reference implementation.
 use std::time::Duration;
 
-use alloy::{
-    primitives::{TxHash, U256},
-    providers::Provider,
-};
+use alloy::{primitives::TxHash, providers::Provider};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    field::Field,
     pool::Pool,
     provider::TornadoProviderExt,
     relayer::{
@@ -44,7 +42,7 @@ pub struct Relayer {
 pub struct JobReceipt {
     pub id: JobId,
     pub pool: Pool,
-    pub nullifier_hash: U256,
+    pub nullifier_hash: Field,
 }
 
 /// The status of a relayed withdrawal.

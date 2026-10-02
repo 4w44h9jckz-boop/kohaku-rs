@@ -12,7 +12,7 @@ use crate::{
     abis::tornado::Tornado,
     pool::Pool,
     syncer::{
-        SyncEvent, Snapshot, Syncer, SyncerError,
+        Snapshot, SyncEvent, Syncer, SyncerError,
         event::{Deposit, Withdrawal},
     },
 };
@@ -37,6 +37,8 @@ pub enum RpcSyncerError {
     },
     #[error("Missing block number in log")]
     MissingBlockNumber,
+    #[error("Field conversion error: {0}")]
+    Field(#[from] crate::field::NotInRangeError),
 }
 
 impl<P: Provider> RpcSyncer<P> {
@@ -108,7 +110,10 @@ impl<P: Provider> RpcSyncer<P> {
             for log in logs {
                 match log.try_into() {
                     Ok(decoded) => events.push(decoded),
-                    Err(e) => warn!("Failed to decode log: {}", e),
+                    Err(RpcSyncerError::UnknownEvent { topics }) => {
+                        warn!("Unknown event with topics {topics:?}");
+                    }
+                    Err(e) => return Err(e),
                 }
             }
 
@@ -144,7 +149,7 @@ impl TryFrom<Log> for SyncEvent {
             Some(&Tornado::Deposit::SIGNATURE_HASH) => {
                 let decoded = Tornado::Deposit::decode_log(&log.inner)?.data;
                 Ok(SyncEvent::Deposit(Deposit {
-                    commitment: decoded.commitment,
+                    commitment: decoded.commitment.try_into()?,
                     leaf_index: decoded.leafIndex,
                     block_number: log.block_number.ok_or(RpcSyncerError::MissingBlockNumber)?,
                 }))
@@ -153,7 +158,7 @@ impl TryFrom<Log> for SyncEvent {
                 let decoded = Tornado::Withdrawal::decode_log(&log.inner)?.data;
                 Ok(SyncEvent::Withdrawal(Withdrawal {
                     to: decoded.to,
-                    nullifier_hash: decoded.nullifierHash,
+                    nullifier_hash: decoded.nullifierHash.try_into()?,
                     relayer: decoded.relayer,
                     fee: decoded.fee,
                     block_number: log.block_number.ok_or(RpcSyncerError::MissingBlockNumber)?,

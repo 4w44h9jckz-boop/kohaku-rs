@@ -31,7 +31,7 @@ const ORDER: U256 =
 /// 200 bits, encodes each segment as a signed-window scalar, multiplies by
 /// the corresponding generator point, and returns the x-coordinate of the
 /// accumulated point.
-pub fn pedersen_hash(data: &[u8]) -> U256 {
+pub fn pedersen_hash(data: &[u8]) -> Fr {
     let bits: Vec<bool> = (0..data.len() * 8).map(|i| test_bit(data, i)).collect();
     let n_segments = (bits.len().saturating_sub(1) / BITS_PER_SEGMENT) + 1;
 
@@ -53,9 +53,7 @@ pub fn pedersen_hash(data: &[u8]) -> U256 {
         acc = acc.projective().add(&contribution.projective()).affine();
     }
 
-    let x_big = fr_to_num_bigint(acc.x);
-    let (_, bytes_le) = x_big.to_bytes_le();
-    U256::from_le_slice(&bytes_le)
+    acc.x
 }
 
 /// Encode a segment's bits as a signed scalar.
@@ -176,19 +174,17 @@ fn blake256(data: &[u8]) -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use ruint::uint;
-
     use super::*;
 
     #[test]
     fn test_pedersen_hash() {
         // Expected value verified against circomlib's pedersenHash("Hello, world!")
         let hash = pedersen_hash(b"Hello, world!");
-        assert_eq!(
-            hash,
-            uint!(
-                13491600061712299675396441404596955294388976214662355192405913840310160783842_U256
-            )
-        );
+        let expected = uint!(
+            13491600061712299675396441404596955294388976214662355192405913840310160783842_U256
+        )
+        .try_into()
+        .unwrap();
+        assert_eq!(hash, expected);
     }
 }

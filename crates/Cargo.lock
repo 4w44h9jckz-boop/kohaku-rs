@@ -3747,13 +3747,10 @@ dependencies = [
 name = "kohaku-merkle-tree"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "criterion",
- "kohaku-kv-store",
  "rand 0.10.2",
- "ruint",
+ "rayon",
  "thiserror 2.0.20",
- "tokio",
 ]
 
 [[package]]
@@ -3771,7 +3768,6 @@ dependencies = [
  "hex",
  "insta",
  "kohaku-fork-kit",
- "kohaku-kv-store",
  "kohaku-merkle-tree",
  "kohaku-tornadocash-circuit",
  "kohaku-userop-kit",

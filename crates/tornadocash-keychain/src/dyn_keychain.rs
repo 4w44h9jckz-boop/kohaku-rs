@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use kohaku_tornadocash::{NoteString, pool::Pool};
-use ruint::aliases::U256;
+use kohaku_tornadocash::{NoteString, field::Field, pool::Pool};
 
 use crate::{Keychain, KeychainError};
 
@@ -21,10 +20,10 @@ impl Keychain for DynKeychain {
     async fn note(&self, pool: &Pool, nonce: u64) -> Result<NoteString, KeychainError> {
         self.0.note(pool, nonce).await
     }
-    async fn commitment(&self, pool: &Pool, nonce: u64) -> Result<U256, KeychainError> {
+    async fn commitment(&self, pool: &Pool, nonce: u64) -> Result<Field, KeychainError> {
         self.0.commitment(pool, nonce).await
     }
-    async fn nullifier_hash(&self, pool: &Pool, nonce: u64) -> Result<U256, KeychainError> {
+    async fn nullifier_hash(&self, pool: &Pool, nonce: u64) -> Result<Field, KeychainError> {
         self.0.nullifier_hash(pool, nonce).await
     }
 }

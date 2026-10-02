@@ -1,18 +1,23 @@
-use std::collections::HashMap;
+use std::array::from_fn;
 
-use kohaku_kv_store::{Store, backend::StoreError};
-use ruint::aliases::U256;
+use crate::{element::Element, hasher::Hasher};
 
-use crate::{hasher::Hasher, store::MerkleTreeStoreExt};
-
+pub mod element;
 pub mod hasher;
 pub mod proof;
-mod store;
 
-/// A binary Merkle tree with a fixed depth `D` and hash function `H`.
+/// Number of parents in a level below which parallel hashing costs more than it saves.
+const PARALLEL_THRESHOLD: usize = 256;
+
+/// A Merkle tree with a fixed depth and arity.
 #[derive(Clone)]
-pub struct MerkleTree<const D: usize, H: Hasher> {
-    store: Store,
+pub struct MerkleTree<const DEPTH: usize, const ARITY: usize, E: Element, H: Hasher<ARITY, E>> {
+    /// `nodes[0]` holds the leaves; `nodes[level]` holds the hashes at `level`.
+    nodes: Vec<Vec<E>>,
+
+    /// The hash of an empty subtree at each level, `0..=DEPTH`.
+    zeros: Vec<E>,
+
     phantom: std::marker::PhantomData<H>,
 }
 
@@ -21,92 +26,78 @@ pub enum MerkleTreeError {
     #[error("Merkle tree is full")]
     TreeFull,
     #[error("Missing leaf element")]
-    MissingLeaf(U256),
+    MissingLeaf,
     #[error("Index {0} is out of bounds")]
     IndexOutOfBounds(usize),
-    #[error("store error: {0}")]
-    Store(#[from] StoreError),
     #[error("Other: {0}")]
     Other(String),
 }
 
-impl<const D: usize, H: Hasher> MerkleTree<D, H> {
-    /// Creates a new Merkle tree backed by `store`.
-    ///
-    /// If `store` already contains a tree, it will be used; otherwise, a new empty tree will be
-    /// created.
-    pub fn new(store: Store) -> Self {
+impl<const DEPTH: usize, const ARITY: usize, E: Element, H: Hasher<ARITY, E>>
+    MerkleTree<DEPTH, ARITY, E, H>
+{
+    /// Creates a new Merkle tree.
+    pub fn new() -> Self {
+        const {
+            assert!(ARITY >= 2, "ARITY must be at least 2");
+            assert!(ARITY <= 256, "ARITY must be at most 256");
+        }
+
         Self {
-            store,
+            nodes: vec![Vec::new(); DEPTH + 1],
+            zeros: zero_hashes::<ARITY, E, H>(DEPTH),
             phantom: std::marker::PhantomData,
         }
     }
 
-    /// Returns the tree's root hash.
-    ///
-    /// # Errors
-    /// Returns an error if the store fails to read the root node.
-    pub async fn root(&self) -> Result<U256, MerkleTreeError> {
-        Ok(match self.store.node(D as u8, 0).await? {
-            Some(root) => root,
-            None => zero_hashes::<D, H>(D)[D],
-        })
+    /// Creates a new Merkle tree from the given leaves.
+    pub fn from_leaves(leaves: &[E]) -> Result<Self, MerkleTreeError> {
+        let mut tree = Self::new();
+        tree.splice(0, leaves)?;
+        Ok(tree)
     }
 
-    /// Returns the inclusion proof for the given leaf.
-    ///
-    /// # Errors
-    /// Returns an error if the leaf is not found in the tree.
-    pub async fn leaf_proof(&self, leaf: U256) -> Result<proof::MerkleProof<D>, MerkleTreeError> {
-        let len = self.store.leaf_count().await?;
-        for index in 0..len {
-            if self.store.node(0, index).await? == Some(leaf) {
-                return self.proof(index as usize).await;
-            }
-        }
+    /// Returns the tree's root hash.
+    pub fn root(&self) -> Result<E, MerkleTreeError> {
+        Ok(self.node(DEPTH, 0))
+    }
 
-        Err(MerkleTreeError::MissingLeaf(leaf))
+    /// Returns the tree's leaves.
+    pub fn leaves(&self) -> &[E] {
+        &self.nodes[0]
+    }
+
+    /// Returns the tree's nodes.
+    pub fn nodes(&self) -> &[Vec<E>] {
+        &self.nodes
     }
 
     /// Returns the inclusion proof for the leaf at the given index.
     ///
     /// # Errors
     /// Returns an error if the index is out of bounds.
-    pub async fn proof(&self, index: usize) -> Result<proof::MerkleProof<D>, MerkleTreeError> {
-        let len = self.store.leaf_count().await? as usize;
+    pub fn proof(
+        &self,
+        index: usize,
+    ) -> Result<proof::MerkleProof<DEPTH, ARITY, E>, MerkleTreeError> {
+        let len = self.nodes[0].len();
         if index >= len {
             return Err(MerkleTreeError::IndexOutOfBounds(index));
         }
 
-        let zeros = zero_hashes::<D, H>(D);
-        let mut path = [0u8; D];
-        let mut siblings = [U256::ZERO; D];
+        let mut path = [0u8; DEPTH];
+        let mut siblings: [[E; ARITY]; DEPTH] = from_fn(|_| from_fn(|_| E::default()));
         let mut idx = index;
 
-        for level in 0..D {
-            path[level] = (idx % 2) as u8;
-
-            let sibling_idx = (idx ^ 1) as u64;
-            siblings[level] = match self.store.node(level as u8, sibling_idx).await? {
-                Some(node) => node,
-                None => zeros[level],
-            };
-
-            idx /= 2;
+        for level in 0..DEPTH {
+            let parent = idx / ARITY;
+            path[level] = (idx % ARITY) as u8;
+            siblings[level] = from_fn(|i| self.node(level, parent * ARITY + i));
+            idx = parent;
         }
 
-        let element = self
-            .store
-            .node(0, index as u64)
-            .await?
-            .ok_or(MerkleTreeError::IndexOutOfBounds(index))?;
-
-        Ok(proof::MerkleProof {
-            root: self.root().await?,
-            leaf: element,
-            path,
-            siblings,
-        })
+        let leaf = self.nodes[0][index].clone();
+        Ok(proof::MerkleProof::new(leaf, siblings, path, self.root()?))
     }
 
     /// Inserts a single leaf at `index`. If a leaf already exists at that index, it is
@@ -114,212 +105,278 @@ impl<const D: usize, H: Hasher> MerkleTree<D, H> {
     ///
     /// # Errors
     /// Returns an error if the index is out of bounds or the tree is full.
-    pub async fn insert(&self, index: usize, leaf: U256) -> Result<(), MerkleTreeError> {
-        self.splice(index, &[leaf]).await
+    pub fn insert(&mut self, index: usize, leaf: E) -> Result<(), MerkleTreeError> {
+        self.splice(index, &[leaf])
     }
 
     /// Splices in `leaves` starting at `index`. If any leaves already exist at those indices,
-    /// they are replaced.
+    /// they are replaced. Spliced leaves must be contiguous.
     ///
     /// # Errors
     /// Returns an error if the index is out of bounds or the tree is full.
-    pub async fn splice(&self, index: usize, leaves: &[U256]) -> Result<(), MerkleTreeError> {
+    pub fn splice(&mut self, index: usize, leaves: &[E]) -> Result<(), MerkleTreeError> {
         if leaves.is_empty() {
             return Ok(());
         }
 
-        let len = self.store.leaf_count().await? as usize;
+        let len = self.nodes[0].len();
         if index > len {
             return Err(MerkleTreeError::IndexOutOfBounds(index));
         }
 
-        let capacity = 2usize.checked_pow(D as u32).unwrap_or(usize::MAX);
+        let capacity = ARITY.checked_pow(DEPTH as u32).unwrap_or(usize::MAX);
         let new_len = (index + leaves.len()).max(len);
         if new_len > capacity {
             return Err(MerkleTreeError::TreeFull);
         }
 
-        let zeros = zero_hashes::<D, H>(D);
-        let mut pending: HashMap<(u8, u64), U256> = HashMap::new();
-        for (offset, &leaf) in leaves.iter().enumerate() {
-            pending.insert((0, (index + offset) as u64), leaf);
+        self.nodes[0].resize(new_len, self.zeros[0].clone());
+        self.nodes[0][index..index + leaves.len()].clone_from_slice(leaves);
+
+        let mut start = index;
+        let mut end = index + leaves.len();
+
+        for level in 1..=DEPTH {
+            start /= ARITY;
+            end = end.div_ceil(ARITY);
+
+            let level_len = end.max(self.nodes[level].len());
+            self.nodes[level].resize(level_len, self.zeros[level].clone());
+
+            let (lower, upper) = self.nodes.split_at_mut(level);
+            hash_level::<ARITY, E, H>(
+                &lower[level - 1][start * ARITY..],
+                &mut upper[0][start..end],
+                &self.zeros[level - 1],
+                PARALLEL_THRESHOLD,
+            );
         }
-
-        let mut range_start = index;
-        let mut range_end = index + leaves.len();
-        let mut child_len = len;
-
-        for level in 1..=D {
-            let start = range_start / 2;
-            let end = range_end.div_ceil(2);
-
-            for parent_idx in start..end {
-                let mut children = [zeros[level - 1]; 2];
-                for (k, child) in children.iter_mut().enumerate() {
-                    let child_idx = (parent_idx * 2 + k) as u64;
-                    *child = if let Some(&node) = pending.get(&((level - 1) as u8, child_idx)) {
-                        node
-                    } else if (child_idx as usize) < child_len {
-                        self.store
-                            .node((level - 1) as u8, child_idx)
-                            .await?
-                            .unwrap_or(zeros[level - 1])
-                    } else {
-                        zeros[level - 1]
-                    };
-                }
-                pending.insert(
-                    (level as u8, parent_idx as u64),
-                    H::hash(children[0], children[1]),
-                );
-            }
-
-            range_start = start;
-            range_end = end;
-            child_len = child_len.div_ceil(2);
-        }
-
-        let nodes: Vec<(u8, u64, U256)> = pending
-            .into_iter()
-            .map(|((level, node_index), hash)| (level, node_index, hash))
-            .collect();
-        self.store.commit(new_len as u64, &nodes).await?;
 
         Ok(())
     }
+
+    /// Returns the node at (`level`, `index`), falling back to the empty-subtree hash for
+    /// indices past the end of that level.
+    fn node(&self, level: usize, index: usize) -> E {
+        self.nodes[level]
+            .get(index)
+            .cloned()
+            .unwrap_or(self.zeros[level].clone())
+    }
 }
 
-/// Computes the hash of a fully-empty subtree at each height from `0` to `levels` (inclusive),
-/// where height `0` is the hasher's zero leaf value.
-fn zero_hashes<const D: usize, H: Hasher>(levels: usize) -> Vec<U256> {
+impl<const DEPTH: usize, const ARITY: usize, E: Element + PartialEq, H: Hasher<ARITY, E>>
+    MerkleTree<DEPTH, ARITY, E, H>
+{
+    /// Returns the inclusion proof for the given leaf.
+    ///
+    /// # Errors
+    /// Returns an error if the leaf is not found in the tree.
+    pub fn leaf_proof(
+        &self,
+        leaf: E,
+    ) -> Result<proof::MerkleProof<DEPTH, ARITY, E>, MerkleTreeError> {
+        let len = self.nodes[0].len();
+        for index in 0..len {
+            if self.nodes[0][index] == leaf {
+                return self.proof(index);
+            }
+        }
+
+        Err(MerkleTreeError::MissingLeaf)
+    }
+}
+
+/// Hashes each `ARITY`-wide chunk of `children` into the matching slot of `parents`.
+#[cfg_attr(not(feature = "parallel"), expect(unused_variables))]
+fn hash_level<const ARITY: usize, E: Element, H: Hasher<ARITY, E>>(
+    children: &[E],
+    parents: &mut [E],
+    zero: &E,
+    parallel_threshold: usize,
+) {
+    #[cfg(feature = "parallel")]
+    if parents.len() >= parallel_threshold {
+        use rayon::prelude::*;
+
+        parents
+            .par_iter_mut()
+            .zip(children.par_chunks(ARITY))
+            .for_each(|(parent, chunk)| *parent = H::hash(pad_chunk(chunk, zero)));
+        return;
+    }
+
+    for (parent, chunk) in parents.iter_mut().zip(children.chunks(ARITY)) {
+        *parent = H::hash(pad_chunk(chunk, zero));
+    }
+}
+
+/// Widens a chunk of children to a full `ARITY` array, filling with `zero`.
+fn pad_chunk<const ARITY: usize, E: Element>(chunk: &[E], zero: &E) -> [E; ARITY] {
+    from_fn(|i| chunk.get(i).cloned().unwrap_or_else(|| zero.clone()))
+}
+
+/// Computes the hash of a fully-empty subtree at each height from `0` to `levels` (inclusive).
+fn zero_hashes<const ARITY: usize, E: Element, H: Hasher<ARITY, E>>(levels: usize) -> Vec<E> {
     let mut zeros = Vec::with_capacity(levels + 1);
     zeros.push(H::zero());
     for i in 1..=levels {
-        zeros.push(H::hash(zeros[i - 1], zeros[i - 1]));
+        let child = &zeros[i - 1];
+        let parent = H::hash(from_fn(|_| child.clone()));
+        zeros.push(parent);
     }
     zeros
 }
 
 #[cfg(test)]
 mod tests {
-    use kohaku_kv_store::memory::MemoryStore;
-
     use super::*;
     use crate::hasher::Hasher;
+
+    type TestTree = MerkleTree<3, 2, u128, TestHasher>;
 
     #[derive(Copy, Clone)]
     struct TestHasher;
 
-    impl Hasher for TestHasher {
-        fn hash(a: U256, b: U256) -> U256 {
-            a ^ b.rotate_left(1)
+    impl<const ARITY: usize> Hasher<ARITY, u128> for TestHasher {
+        fn hash(children: [u128; ARITY]) -> u128 {
+            children
+                .into_iter()
+                .enumerate()
+                .fold(0, |acc, (i, c)| acc ^ c.rotate_left(i as u32))
         }
 
-        fn zero() -> U256 {
-            U256::ZERO
+        fn zero() -> u128 {
+            10
         }
     }
 
-    fn tree() -> MerkleTree<3, TestHasher> {
-        MerkleTree::new(MemoryStore::new().into())
+    fn tree() -> TestTree {
+        TestTree::new()
     }
 
-    #[tokio::test]
-    async fn empty_tree_root_is_deterministic() {
-        let a = tree();
-        let b = tree();
-        assert_eq!(a.root().await.unwrap(), b.root().await.unwrap());
+    #[test]
+    fn root_is_deterministic() {
+        let tree = tree();
+        assert_eq!(tree.root().unwrap(), 102);
     }
 
-    #[tokio::test]
-    async fn insert_and_splice_produce_same_root() {
-        let leaves = [U256::from(1), U256::from(2), U256::from(3)];
+    #[test]
+    fn from_leaves_reproduces_tree() {
+        let leaves = [1, 2, 3];
 
-        let inserted = tree();
+        let mut tree_a = tree();
+        tree_a.splice(0, &leaves).unwrap();
+
+        let tree_b = TestTree::from_leaves(&tree_a.leaves()).unwrap();
+
+        assert_eq!(tree_a.root().unwrap(), tree_b.root().unwrap());
+    }
+
+    #[test]
+    fn insert_changes_root() {
+        let mut tree = tree();
+        let root_a = tree.root().unwrap();
+
+        tree.insert(0, 1).unwrap();
+        let root_b = tree.root().unwrap();
+
+        tree.insert(0, 2).unwrap();
+        let root_c = tree.root().unwrap();
+
+        assert_ne!(root_a, root_b);
+        assert_ne!(root_b, root_c);
+    }
+
+    #[test]
+    fn insert_and_splice_produce_same_root() {
+        let leaves = [1, 2, 3];
+
+        let mut inserted = tree();
         for (i, &l) in leaves.iter().enumerate() {
-            inserted.insert(i, l).await.unwrap();
+            inserted.insert(i, l).unwrap();
         }
 
-        let spliced = tree();
-        spliced.splice(0, &leaves).await.unwrap();
+        let mut spliced = tree();
+        spliced.splice(0, &leaves).unwrap();
 
-        assert_eq!(
-            inserted.root().await.unwrap(),
-            spliced.root().await.unwrap()
-        );
+        assert_eq!(inserted.root().unwrap(), spliced.root().unwrap());
     }
 
-    #[tokio::test]
-    async fn partial_overlap_splice_extends_correctly() {
-        let leaves = [U256::from(1), U256::from(2), U256::from(3)];
-        let full = tree();
-        full.splice(0, &leaves).await.unwrap();
+    #[test]
+    fn splice_idempotent() {
+        let leaves = [1, 2, 3];
+        let mut full = tree();
+        full.splice(0, &leaves).unwrap();
 
-        let root_before = full.root().await.unwrap();
-        full.splice(0, &leaves).await.unwrap();
+        let root_before = full.root().unwrap();
+        full.splice(0, &leaves).unwrap();
 
-        assert_eq!(full.root().await.unwrap(), root_before);
+        assert_eq!(full.root().unwrap(), root_before);
     }
 
-    #[tokio::test]
-    async fn reinserting_the_same_leaf_is_a_no_op() {
-        let tree = tree();
-        tree.insert(0, U256::from(1)).await.unwrap();
-        let root_before = tree.root().await.unwrap();
+    #[test]
+    fn inserting_same_leaf_no_op() {
+        let mut tree = tree();
+        tree.insert(0, 1).unwrap();
+        let root_before = tree.root().unwrap();
 
-        tree.insert(0, U256::from(1)).await.unwrap();
-        assert_eq!(tree.root().await.unwrap(), root_before);
+        tree.insert(0, 1).unwrap();
+        assert_eq!(tree.root().unwrap(), root_before);
     }
 
-    #[tokio::test]
-    async fn reinserting_a_different_leaf_replaces_it() {
-        let tree = tree();
-        tree.insert(0, U256::from(1)).await.unwrap();
-        let root_before = tree.root().await.unwrap();
+    #[test]
+    fn inserting_different_leaf_replaces_it() {
+        let mut tree = tree();
+        tree.insert(0, 1).unwrap();
+        let root_before = tree.root().unwrap();
 
-        tree.insert(0, U256::from(2)).await.unwrap();
+        tree.insert(0, 2).unwrap();
 
-        assert_ne!(tree.root().await.unwrap(), root_before);
-        assert_eq!(
-            tree.leaf_proof(U256::from(2)).await.unwrap().leaf,
-            U256::from(2)
-        );
+        assert_ne!(tree.root().unwrap(), root_before);
+        assert_eq!(tree.leaf_proof(2).unwrap().leaf, 2);
     }
 
-    #[tokio::test]
-    async fn insert_beyond_capacity_errors() {
-        let tree = MerkleTree::<2, TestHasher>::new(MemoryStore::new().into());
-        tree.splice(
-            0,
-            &[U256::from(1), U256::from(2), U256::from(3), U256::from(4)],
-        )
-        .await
-        .unwrap();
+    #[test]
+    fn parallel_and_sequential_hash_level_agree() {
+        let children: Vec<u128> = (1..=127).collect();
+        let zero = 7;
+
+        let mut serial = vec![0; 64];
+        hash_level::<2, u128, TestHasher>(&children, &mut serial, &zero, usize::MAX);
+
+        let mut parallel = vec![0; 64];
+        hash_level::<2, u128, TestHasher>(&children, &mut parallel, &zero, 0);
+
+        assert_eq!(serial, parallel);
+    }
+
+    #[test]
+    fn insert_beyond_capacity_errors() {
+        let mut tree = MerkleTree::<2, 2, u128, TestHasher>::new();
+        tree.splice(0, &[1, 2, 3, 4]).unwrap();
+
+        assert!(matches!(tree.insert(4, 5), Err(MerkleTreeError::TreeFull)));
+    }
+
+    #[test]
+    fn leaf_proof_missing_leaf_errors() {
+        let mut tree = tree();
+        tree.insert(0, 1).unwrap();
 
         assert!(matches!(
-            tree.insert(4, U256::from(5)).await,
-            Err(MerkleTreeError::TreeFull)
+            tree.leaf_proof(9),
+            Err(MerkleTreeError::MissingLeaf)
         ));
     }
 
-    #[tokio::test]
-    async fn leaf_proof_missing_leaf_errors() {
-        let tree = tree();
-        tree.insert(0, U256::from(1)).await.unwrap();
+    #[test]
+    fn proof_out_of_bounds_errors() {
+        let mut tree = tree();
+        tree.insert(0, 1).unwrap();
 
         assert!(matches!(
-            tree.leaf_proof(U256::from(9)).await,
-            Err(MerkleTreeError::MissingLeaf(_))
-        ));
-    }
-
-    #[tokio::test]
-    async fn proof_out_of_bounds_errors() {
-        let tree = tree();
-        tree.insert(0, U256::from(1)).await.unwrap();
-
-        assert!(matches!(
-            tree.proof(5).await,
+            tree.proof(5),
             Err(MerkleTreeError::IndexOutOfBounds(5))
         ));
     }
