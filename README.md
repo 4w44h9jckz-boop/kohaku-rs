@@ -11,7 +11,7 @@
 
 Rusty privacy-first tooling for the Ethereum ecosystem.
 
-Kohaku-rs is a collection of rust crates for working with Ethereum privacy protocols. See the (https://github.com/ethereum/kohaku)[js kohaku repo] for more information.
+Kohaku-rs is a collection of rust crates for working with Ethereum privacy protocols. See the [js kohaku repo](https://github.com/ethereum/kohaku) for more information.
 
 > [!IMPORTANT]
 > This project is a work in progress and is NOT READY FOR PRODUCTION USE. Packages contain UNAUDITED CODE. Consult underlying package READMEs for more information.
