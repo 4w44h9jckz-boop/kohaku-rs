@@ -1,6 +1,6 @@
 # kohaku-merkle-tree
 
-Generic binary Merkle tree implementation in rust. Uses [`kohaku-kv-store`](../kv-store/) as the underlying storage engine.
+Generic N-arity Merkle tree implementation in rust.
 
 ## Benchmarks
 

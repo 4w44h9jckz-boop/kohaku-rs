@@ -3733,17 +3733,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kohaku-kv-store"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "redb",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
-]
-
-[[package]]
 name = "kohaku-merkle-tree"
 version = "0.1.0"
 dependencies = [
@@ -4811,15 +4800,6 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
  "wasm_sync",
-]
-
-[[package]]
-name = "redb"
-version = "4.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb338a6c67830a61bed824b78c2bb034ab1ff401a20616bd7957524f4fdc2f22"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -5900,7 +5880,6 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
