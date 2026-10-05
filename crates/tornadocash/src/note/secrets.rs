@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 macro_rules! bytes31_newtype {
     ($name:ident) => {
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+        #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
         pub struct $name([u8; 31]);
 
         impl $name {
@@ -41,6 +41,12 @@ macro_rules! bytes31_newtype {
         impl rand::distr::Distribution<$name> for rand::distr::StandardUniform {
             fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> $name {
                 $name(rng.random())
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}([REDACTED])", stringify!($name))
             }
         }
     };
