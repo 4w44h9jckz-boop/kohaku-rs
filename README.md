@@ -11,7 +11,7 @@
 
 Rusty privacy-first tooling for the Ethereum ecosystem.
 
-Kohaku-rs is a collection of rust crates for working with Ethereum privacy protocols. See [ethereum.github.io/kohaku](https://ethereum.github.io/kohaku/) for more information on the Kohaku project.
+Kohaku-rs is a collection of rust crates for working with Ethereum privacy protocols. See the (https://github.com/ethereum/kohaku)[js kohaku repo] for more information.
 
 > [!IMPORTANT]
 > This project is a work in progress and is NOT READY FOR PRODUCTION USE. Packages contain UNAUDITED CODE. Consult underlying package READMEs for more information.
@@ -29,7 +29,7 @@ Kohaku-rs is a collection of rust crates for working with Ethereum privacy proto
 
 Experiments are incomplete and unstable features that are not ready for production use. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for more information.
 
-- [`kohaku-pir-provider`](https://github.com/ethereum/kohaku-rs/tree/experiments/pir-v1/crates/pir-provider) - Helios-style dual-endpoint Ethereum provider: PIR for private account reads, fallback JSON-RPC for everything else.
+- [`kohaku-privacy-rpc`](https://github.com/ethereum/kohaku-rs/tree/experiments/pir-v1/crates/privacy-rpc) -  dual-endpoint Ethereum provider: PIR for private account reads, fallback JSON-RPC for everything else. Can also enable Tor for network level anonymity.
 
 ## Development
 
