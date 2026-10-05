@@ -8,14 +8,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use crate::note::secrets::{Nullifier, Secret};
-use crate::{Pool, crypto::pedersen::pedersen_hash, field::Field};
+use crate::{crypto::pedersen::pedersen_hash, field::Field, pool::Pool};
 
 mod secrets;
 
 /// Tornadocash deposit note.
 ///
 /// Notes are produced when a user deposits funds into a tornadocash pool. They
-/// are used to withdraw the funds from the same pool later.
+/// contain the secret material required to later withdraw the funds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     pub nullifier: Nullifier,
@@ -24,8 +24,8 @@ pub struct Note {
 
 /// Displayable Tornadocash note.
 ///
-/// Includes hints for the note's asset & pool. Parses from and formats to strings in the
-/// standard tornadocash format.
+/// Includes hints for the note's asset & pool. Parses from and formats the
+/// standard Tornado Cash format.
 ///
 /// ```text
 /// tornado-{symbol}-{amount}-{chain_id}-0x{nullifier}{secret}
@@ -93,11 +93,11 @@ impl NoteString {
     }
 
     #[must_use]
-    pub fn from_pool(note: Note, pool: Pool) -> Self {
+    pub fn from_pool(note: Note, pool: &Pool) -> Self {
         Self {
             note,
             symbol: pool.symbol().to_string(),
-            amount: pool.amount().to_string(),
+            amount: pool.amount().clone(),
             chain_id: pool.chain_id,
         }
     }

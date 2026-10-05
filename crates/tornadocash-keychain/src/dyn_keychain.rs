@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use kohaku_tornadocash::{NoteString, field::Field, pool::Pool};
+use kohaku_tornadocash::{Field, NoteString, Pool};
 
 use crate::{Keychain, KeychainError};
 

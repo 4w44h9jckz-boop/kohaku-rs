@@ -41,7 +41,7 @@ struct RemoteWithdrawal {
 }
 
 #[derive(Debug, Error)]
-pub enum RemoteSyncerError {
+enum RemoteSyncerError {
     #[error("HTTP error: {0}")]
     HttpError(#[from] reqwest::Error),
     #[error("Serde error: {0}")]
@@ -93,14 +93,14 @@ impl RemoteSyncer {
         info!("Syncing from {} to {}", range.start, range.end);
 
         let deposits: Vec<SyncEvent> = deposits
-            .into_iter()
+            .iter()
             .filter(|d| range.contains(&d.block_number))
-            .map(TryInto::try_into)
+            .map(decode_deposit)
             .collect::<Result<_, _>>()?;
         let withdrawals: Vec<SyncEvent> = withdrawals
-            .into_iter()
+            .iter()
             .filter(|n| range.contains(&n.block_number))
-            .map(TryInto::try_into)
+            .map(decode_withdrawal)
             .collect::<Result<_, _>>()?;
 
         let events = deposits.into_iter().chain(withdrawals).collect();
@@ -145,30 +145,22 @@ impl RemoteSyncer {
     }
 }
 
-impl TryFrom<RemoteDeposit> for SyncEvent {
-    type Error = RemoteSyncerError;
-
-    fn try_from(remote: RemoteDeposit) -> Result<Self, Self::Error> {
-        Ok(SyncEvent::Deposit(Deposit {
-            commitment: remote.commitment.try_into()?,
-            leaf_index: remote.leaf_index,
-            block_number: remote.block_number,
-        }))
-    }
+fn decode_deposit(deposit: &RemoteDeposit) -> Result<SyncEvent, RemoteSyncerError> {
+    Ok(SyncEvent::Deposit(Deposit {
+        commitment: deposit.commitment.try_into()?,
+        leaf_index: deposit.leaf_index,
+        block_number: deposit.block_number,
+    }))
 }
 
-impl TryFrom<RemoteWithdrawal> for SyncEvent {
-    type Error = RemoteSyncerError;
-
-    fn try_from(remote: RemoteWithdrawal) -> Result<Self, Self::Error> {
-        Ok(SyncEvent::Withdrawal(Withdrawal {
-            to: remote.to,
-            nullifier_hash: remote.nullifier.try_into()?,
-            relayer: Address::ZERO,
-            fee: remote.fee,
-            block_number: remote.block_number,
-        }))
-    }
+fn decode_withdrawal(withdrawal: &RemoteWithdrawal) -> Result<SyncEvent, RemoteSyncerError> {
+    Ok(SyncEvent::Withdrawal(Withdrawal {
+        to: withdrawal.to,
+        nullifier_hash: withdrawal.nullifier.try_into()?,
+        relayer: Address::ZERO,
+        fee: withdrawal.fee,
+        block_number: withdrawal.block_number,
+    }))
 }
 
 /// Returns the highest block number covered by the cached deposits and withdrawals.

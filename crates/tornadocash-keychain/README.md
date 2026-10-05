@@ -15,11 +15,12 @@ Nonces are used to derive tornadocash note secrets from a keychain. Nonces shoul
 ### Deposit
 
 ```rust,no_run
+use kohaku_tornadocash::Pool;
 use kohaku_tornadocash_keychain::{DynKeychain, Keychain};
 
 async fn example(
     keychain: &DynKeychain,
-    pool: &kohaku_tornadocash::Pool,
+    pool: &Pool,
     nonce: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let deposit = keychain.deposit(pool, nonce).await?;
@@ -31,12 +32,12 @@ async fn example(
 ### Withdraw
 
 ```rust,no_run
-use kohaku_tornadocash::withdrawal::Withdrawal;
+use kohaku_tornadocash::{Pool, Withdrawal};
 use kohaku_tornadocash_keychain::{DynKeychain, Keychain};
 
 async fn example(
     keychain: &DynKeychain,
-    pool: &kohaku_tornadocash::Pool,
+    pool: &Pool,
     nonce: u64,
     recipient: alloy::primitives::Address,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -50,13 +51,13 @@ async fn example(
 ### Note Recovery
 
 ```rust,no_run
-use kohaku_tornadocash::syncer::Syncer;
+use kohaku_tornadocash::{Pool, syncer::{DynSyncer, Syncer}};
 use kohaku_tornadocash_keychain::{DynKeychain, recovery::{recover, next_nonce}};
 
 async fn example(
     keychain: &DynKeychain,
-    syncer: &kohaku_tornadocash::DynSyncer,
-    pool: &kohaku_tornadocash::Pool,
+    syncer: &DynSyncer,
+    pool: &Pool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let snapshot = syncer.sync(pool, ..).await?;
     let notes = recover(keychain, pool, &snapshot.events, None).await?;

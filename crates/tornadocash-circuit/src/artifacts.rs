@@ -34,7 +34,6 @@ fn decompress(data: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
 

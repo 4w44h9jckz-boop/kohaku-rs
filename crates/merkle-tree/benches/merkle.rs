@@ -37,7 +37,7 @@ fn bench_insert(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(n), |b| {
             b.iter(|| {
                 let mut tree = Tree::new();
-                black_box(tree.splice(0, &leaves).expect("Failed to insert leaves"));
+                tree.splice(black_box(0), black_box(&leaves)).expect("Failed to insert leaves");
             });
         });
     }
@@ -56,7 +56,7 @@ fn bench_proof(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(n), |b| {
             b.iter(|| {
                 for i in 0..n {
-                    black_box(tree.proof(i).expect("Failed to generate proof"));
+                    tree.proof(black_box(i)).expect("Failed to generate proof");
                 }
             });
         });

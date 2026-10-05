@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{asset::Asset, pool::Pool, relayer::RelayerError, withdrawal::Payer};
 
-/// Relayer status response.
+/// A relayer's status.
 ///
-/// See [tornado-relayer/src/contollers/status.js](https://github.com/tornado-dao/tornado-relayer/blob/52473197ea49fb70dab8fead01de52545801ca6b/src/contollers/status.js#L13)
+/// Response from `v1/status`. See [tornado-relayer/src/contollers/status.js](https://github.com/tornado-dao/tornado-relayer/blob/52473197ea49fb70dab8fead01de52545801ca6b/src/contollers/status.js#L13)
 /// for the reference.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +24,7 @@ pub struct RelayerStatus {
     pub current_queue: u32,
 }
 
+/// A pool instance supported by a relayer.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Instance {
@@ -32,6 +33,7 @@ pub struct Instance {
     pub decimals: u8,
 }
 
+/// The health of a relayer.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Health {
     pub status: Option<String>,

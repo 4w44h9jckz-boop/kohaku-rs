@@ -5,16 +5,17 @@ use std::{
     sync::Arc,
 };
 
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{pool::Pool, syncer::event::SyncEvent};
+use crate::pool::Pool;
 
-pub mod event;
+mod event;
 pub mod remote;
 pub mod rpc;
 #[cfg(feature = "saga-sync")]
-pub mod saga_sync;
+pub mod saga;
+
+pub use event::{Deposit, Snapshot, SyncEvent, Withdrawal};
 
 /// Fetches a pool's events from some source.
 #[cfg_attr(native, async_trait::async_trait)]
@@ -50,17 +51,6 @@ pub trait Syncer: Send + Sync {
 /// See [`Syncer`].
 #[derive(Clone)]
 pub struct DynSyncer(Arc<dyn Syncer>);
-
-/// A set of events emitted by a pool within a given block range.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Snapshot {
-    /// The half-open block range these events cover.
-    pub range: Range<u64>,
-    /// The events the pool emitted within `range`.
-    ///
-    /// Deposits must be contiguous and in ascending order by leaf index.
-    pub events: Vec<SyncEvent>,
-}
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

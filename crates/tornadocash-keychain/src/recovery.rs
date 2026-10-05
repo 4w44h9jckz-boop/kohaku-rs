@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
 use kohaku_tornadocash::{
-    field::Field,
-    pool::Pool,
-    syncer::event::{self, SyncEvent},
+    Field, Pool,
+    syncer::{Deposit, SyncEvent, Withdrawal},
 };
 
 use crate::{Keychain, KeychainError};
@@ -18,9 +17,9 @@ pub struct RecoveredNote {
     /// The nonce used to derive the note.
     pub nonce: u64,
     /// The deposit event that created the note.
-    pub deposit: event::Deposit,
+    pub deposit: Deposit,
     /// The withdrawal event that spent the note, if any.
-    pub withdrawal: Option<event::Withdrawal>,
+    pub withdrawal: Option<Withdrawal>,
 }
 
 /// Returns the next nonce that should be used for a new note derived from `keychain` for `pool`.
@@ -90,7 +89,7 @@ pub async fn recover(
 }
 
 /// Indexes the deposits in `events` by commitment.
-fn deposits(events: &[SyncEvent]) -> HashMap<Field, &event::Deposit> {
+fn deposits(events: &[SyncEvent]) -> HashMap<Field, &Deposit> {
     events
         .iter()
         .filter_map(|event| match event {
@@ -101,7 +100,7 @@ fn deposits(events: &[SyncEvent]) -> HashMap<Field, &event::Deposit> {
 }
 
 /// Indexes the withdrawals in `events` by nullifier hash.
-fn withdrawals(events: &[SyncEvent]) -> HashMap<Field, &event::Withdrawal> {
+fn withdrawals(events: &[SyncEvent]) -> HashMap<Field, &Withdrawal> {
     events
         .iter()
         .filter_map(|event| match event {
@@ -114,10 +113,7 @@ fn withdrawals(events: &[SyncEvent]) -> HashMap<Field, &event::Withdrawal> {
 #[cfg(test)]
 mod tests {
     use alloy::primitives::{Address, U256};
-    use kohaku_tornadocash::{
-        Note, NoteString,
-        note::{Nullifier, Secret},
-    };
+    use kohaku_tornadocash::{Note, NoteString, Nullifier, Secret};
 
     use super::*;
 
@@ -198,7 +194,7 @@ mod tests {
 
             Ok(NoteString::from_pool(
                 Note::new(Nullifier::new(bytes), Secret::new(bytes)),
-                pool.clone(),
+                pool,
             ))
         }
     }
@@ -212,7 +208,7 @@ mod tests {
     }
 
     fn deposit(note: &Note, leaf_index: u32) -> SyncEvent {
-        SyncEvent::Deposit(event::Deposit {
+        SyncEvent::Deposit(Deposit {
             commitment: note.commitment(),
             leaf_index,
             block_number: 0,
@@ -220,7 +216,7 @@ mod tests {
     }
 
     fn withdrawal(note: &Note) -> SyncEvent {
-        SyncEvent::Withdrawal(event::Withdrawal {
+        SyncEvent::Withdrawal(Withdrawal {
             to: Address::ZERO,
             nullifier_hash: note.nullifier_hash(),
             relayer: Address::ZERO,

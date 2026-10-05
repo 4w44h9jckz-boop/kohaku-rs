@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use kohaku_tornadocash::{Deposit, NoteString, field::Field, pool::Pool};
+use kohaku_tornadocash::{Deposit, Field, NoteString, Pool};
 use thiserror::Error;
 
 mod dyn_keychain;

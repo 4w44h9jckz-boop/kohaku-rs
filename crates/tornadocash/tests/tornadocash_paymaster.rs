@@ -12,13 +12,10 @@ use kohaku_fork_kit::{
     simple_account::deploy_simple_account,
 };
 use kohaku_tornadocash::{
-    deposit::Deposit,
+    Deposit, PaymasterInfo, TornadoProviderExt, Withdrawal,
     merkle_tree::{MerkleTree, MerkleTreeExt},
-    pool::PaymasterInfo,
-    provider::TornadoProviderExt,
     syncer::{Syncer, rpc::RpcSyncer},
     userop_provider::UserOperationPaymasterExt,
-    withdrawal::Withdrawal,
 };
 use kohaku_userop_kit::{
     builder::UserOperationBuilder,
@@ -71,7 +68,7 @@ async fn test_tornadocash_paymaster() -> Result<(), anyhow::Error> {
     // Deposit a note
     info!("Depositing into pool");
     let deposit = Deposit::new(&pool, rand::random());
-    let note = deposit.note();
+    let note = deposit.note.clone();
     provider
         .send_transaction(deposit.into())
         .await?
@@ -173,7 +170,7 @@ async fn test_tornadocash_paymaster_flashcall() -> Result<(), anyhow::Error> {
     // Deposit a note
     info!("Depositing into pool");
     let deposit = Deposit::new(&pool, rand::random());
-    let note = deposit.note();
+    let note = deposit.note.clone();
     provider
         .send_transaction(deposit.into())
         .await?

@@ -25,8 +25,6 @@ pub enum Asset {
 }
 
 impl Asset {
-    pub const ASSETS: &[Asset] = &[Asset::ETH, Asset::MATIC, Asset::ETHEREUM_DAI];
-
     pub const ETH: Asset = Asset::Native {
         symbol: Cow::Borrowed("eth"),
         decimals: 18,

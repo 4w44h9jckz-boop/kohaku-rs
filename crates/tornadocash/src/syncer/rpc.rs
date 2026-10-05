@@ -26,7 +26,7 @@ pub struct RpcSyncer<P: Provider> {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum RpcSyncerError {
+enum RpcSyncerError {
     #[error("Error decoding log: {0}")]
     LogDecodeError(#[from] alloy::sol_types::Error),
     #[error("RPC error: {0}")]
@@ -108,7 +108,7 @@ impl<P: Provider> RpcSyncer<P> {
             sleep(self.batch_delay).await;
 
             for log in logs {
-                match log.try_into() {
+                match decode_log(&log) {
                     Ok(decoded) => events.push(decoded),
                     Err(RpcSyncerError::UnknownEvent { topics }) => {
                         warn!("Unknown event with topics {topics:?}");
@@ -141,32 +141,28 @@ impl<P: Provider> RpcSyncer<P> {
     }
 }
 
-impl TryFrom<Log> for SyncEvent {
-    type Error = RpcSyncerError;
-
-    fn try_from(log: Log) -> Result<Self, Self::Error> {
-        match log.topics().first() {
-            Some(&Tornado::Deposit::SIGNATURE_HASH) => {
-                let decoded = Tornado::Deposit::decode_log(&log.inner)?.data;
-                Ok(SyncEvent::Deposit(Deposit {
-                    commitment: decoded.commitment.try_into()?,
-                    leaf_index: decoded.leafIndex,
-                    block_number: log.block_number.ok_or(RpcSyncerError::MissingBlockNumber)?,
-                }))
-            }
-            Some(&Tornado::Withdrawal::SIGNATURE_HASH) => {
-                let decoded = Tornado::Withdrawal::decode_log(&log.inner)?.data;
-                Ok(SyncEvent::Withdrawal(Withdrawal {
-                    to: decoded.to,
-                    nullifier_hash: decoded.nullifierHash.try_into()?,
-                    relayer: decoded.relayer,
-                    fee: decoded.fee,
-                    block_number: log.block_number.ok_or(RpcSyncerError::MissingBlockNumber)?,
-                }))
-            }
-            _ => Err(RpcSyncerError::UnknownEvent {
-                topics: log.topics().to_vec(),
-            }),
+fn decode_log(log: &Log) -> Result<SyncEvent, RpcSyncerError> {
+    match log.topics().first() {
+        Some(&Tornado::Deposit::SIGNATURE_HASH) => {
+            let decoded = Tornado::Deposit::decode_log(&log.inner)?.data;
+            Ok(SyncEvent::Deposit(Deposit {
+                commitment: decoded.commitment.try_into()?,
+                leaf_index: decoded.leafIndex,
+                block_number: log.block_number.ok_or(RpcSyncerError::MissingBlockNumber)?,
+            }))
         }
+        Some(&Tornado::Withdrawal::SIGNATURE_HASH) => {
+            let decoded = Tornado::Withdrawal::decode_log(&log.inner)?.data;
+            Ok(SyncEvent::Withdrawal(Withdrawal {
+                to: decoded.to,
+                nullifier_hash: decoded.nullifierHash.try_into()?,
+                relayer: decoded.relayer,
+                fee: decoded.fee,
+                block_number: log.block_number.ok_or(RpcSyncerError::MissingBlockNumber)?,
+            }))
+        }
+        _ => Err(RpcSyncerError::UnknownEvent {
+            topics: log.topics().to_vec(),
+        }),
     }
 }

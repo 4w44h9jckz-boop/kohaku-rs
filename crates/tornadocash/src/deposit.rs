@@ -43,7 +43,7 @@ impl Deposit {
     #[must_use]
     pub fn input(&self) -> Vec<u8> {
         let deposit_call = Tornado::depositCall {
-            _commitment: self.note().commitment().into(),
+            _commitment: self.note.commitment().into(),
         };
 
         deposit_call.abi_encode()
@@ -76,12 +76,6 @@ impl Deposit {
                 .with_to(address)
                 .input(approve_call.abi_encode().into()),
         )
-    }
-
-    /// Returns the note associated with this deposit.
-    #[must_use]
-    pub fn note(&self) -> Note {
-        self.note.clone()
     }
 }
 

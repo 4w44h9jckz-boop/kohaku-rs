@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn field_from_u256() {
-        let u256 = U256::from(123456789u64);
+        let u256 = U256::from(123_456_789u64);
         let field = Field::try_from(u256).unwrap();
         let back_to_u256: U256 = field.into();
         assert_eq!(u256, back_to_u256);
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn field_from_b256() {
-        let b256: B256 = U256::from(123456789u64).into();
+        let b256: B256 = U256::from(123_456_789u64).into();
         let field = Field::try_from(b256).unwrap();
         let back_to_b256: B256 = field.into();
         assert_eq!(b256, back_to_b256);
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn serialize_deserialize_field() {
-        let field = Field::from(123456789usize);
+        let field = Field::from(123_456_789usize);
         let serialized = serde_json::to_string(&field).unwrap();
         let deserialized: Field = serde_json::from_str(&serialized).unwrap();
         assert_eq!(field, deserialized);
@@ -133,8 +133,8 @@ mod tests {
 
     #[test]
     fn display_field() {
-        let field = Field::from(123456789usize);
-        let display = format!("{}", field);
+        let field = Field::from(123_456_789usize);
+        let display = format!("{field}");
         assert_eq!(
             display,
             "0x00000000000000000000000000000000000000000000000000000000075bcd15"

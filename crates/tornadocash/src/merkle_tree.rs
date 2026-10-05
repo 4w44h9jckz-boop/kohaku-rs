@@ -8,7 +8,7 @@ use kohaku_merkle_tree::{MerkleTreeError, hasher::Hasher};
 use crate::{
     crypto::mimc::mimc_sponge_hash,
     field::Field,
-    syncer::event::{Deposit, SyncEvent},
+    syncer::{Deposit, SyncEvent},
 };
 
 /// `MerkleTree` type used in Tornado Cash.

@@ -8,7 +8,7 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use anyhow::bail;
-use kohaku_tornadocash::{pool::Pool, relayer::Relayer};
+use kohaku_tornadocash::{Pool, relayer::Relayer};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     process::{Child, Command},

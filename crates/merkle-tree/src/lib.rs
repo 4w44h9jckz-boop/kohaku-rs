@@ -187,6 +187,14 @@ impl<const DEPTH: usize, const ARITY: usize, E: Element + PartialEq, H: Hasher<A
     }
 }
 
+impl<const DEPTH: usize, const ARITY: usize, E: Element, H: Hasher<ARITY, E>> Default
+    for MerkleTree<DEPTH, ARITY, E, H>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Hashes each `ARITY`-wide chunk of `children` into the matching slot of `parents`.
 #[cfg_attr(not(feature = "parallel"), expect(unused_variables))]
 fn hash_level<const ARITY: usize, E: Element, H: Hasher<ARITY, E>>(
@@ -268,7 +276,7 @@ mod tests {
         let mut tree_a = tree();
         tree_a.splice(0, &leaves).unwrap();
 
-        let tree_b = TestTree::from_leaves(&tree_a.leaves()).unwrap();
+        let tree_b = TestTree::from_leaves(tree_a.leaves()).unwrap();
 
         assert_eq!(tree_a.root().unwrap(), tree_b.root().unwrap());
     }

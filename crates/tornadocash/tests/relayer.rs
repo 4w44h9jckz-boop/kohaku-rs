@@ -9,10 +9,9 @@ use kohaku_fork_kit::{
     relayer::RelayerBuilder,
 };
 use kohaku_tornadocash::{
-    deposit::Deposit,
+    Deposit, Withdrawal,
     merkle_tree::{MerkleTree, MerkleTreeExt},
     syncer::{Syncer, rpc::RpcSyncer},
-    withdrawal::Withdrawal,
 };
 
 #[tokio::test]
@@ -50,7 +49,7 @@ async fn test_relayer_withdraw() -> Result<(), anyhow::Error> {
 
     // Deposit a note
     let deposit = Deposit::new(&pool, rand::random());
-    let note = deposit.note();
+    let note = deposit.note.clone();
     provider
         .send_transaction(deposit.into())
         .await?

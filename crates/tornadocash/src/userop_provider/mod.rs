@@ -1,4 +1,51 @@
 //! Extension trait for building userops with a Tornadocash paymaster.
+//!
+//! # Example
+//! ```no_run
+//! # use alloy::{providers::DynProvider, signers::local::PrivateKeySigner};
+//! # use kohaku_tornadocash::{
+//! #     merkle_tree::MerkleTree,
+//! #     Note,
+//! #     Pool,
+//! #     userop_provider::UserOperationPaymasterExt,
+//! #     Withdrawal,
+//! # };
+//! # use kohaku_userop_kit::{
+//! #     builder::UserOperationBuilder,
+//! #     bundler::{Bundler, pimlico::PimlicoBundler},
+//! #     smart_account::simple_7702_smart_account::{Call, Simple7702SmartAccount},
+//! # };
+//! #
+//! # async fn example(
+//! #     provider: DynProvider,
+//! #     tree: &MerkleTree,
+//! #     pool: Pool,
+//! #     note: Note,
+//! #     rng: &mut impl rand::CryptoRng,
+//! # ) -> Result<(), Box<dyn std::error::Error>> {
+//! let owner = PrivateKeySigner::random();
+//! let bundler = PimlicoBundler::new("https://bundler.pimlico.com".parse()?);
+//!
+//! let smart_account = Simple7702SmartAccount::new(provider.clone(), owner.address(), pool.chain_id);
+//! let builder = UserOperationBuilder::new_with_smart_account(&smart_account)
+//!     .await?
+//!     .with_call(&vec![Call::default()]);
+//!
+//! // The note pays for gas, and its remainder is withdrawn to `owner` during validation, so the
+//! // operation's own calls can spend it.
+//! let withdrawal_merkle_proof = tree.leaf_proof(note.commitment())?;
+//! let withdrawal = Withdrawal::new(&pool, note, owner.address());
+//! let builder = builder
+//!     .with_tornado_paymaster(withdrawal, &withdrawal_merkle_proof, &provider, &bundler, rng)
+//!     .await?;
+//!
+//! let userop = builder.build().sign(&owner).await?;
+//! let hash = bundler.send_user_operation(&userop).await?;
+//! println!("{hash:?}");
+//!
+//! Ok(())
+//! # }
+//! ```
 
 use alloy::{
     primitives::{Address, Bytes, U256},

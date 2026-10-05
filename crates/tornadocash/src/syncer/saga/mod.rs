@@ -17,7 +17,7 @@ mod manifest;
 /// [saga-sync](https://github.com/fatlabsxyz/saga-sync) protocol.
 ///
 /// Fetches the protocol's manifest, verifies each overlapping chunk's sha256 digest against it,
-/// and decodes the chunk's events into [`SyncEvent`](crate::syncer::event::SyncEvent)s.
+/// and decodes the chunk's events into [`SyncEvent`](crate::syncer::SyncEvent)s.
 ///
 /// Does not currently implement chunk caching or chunk signature verification.
 /// - Chunk caching could be added to reduce redundant network downloads, but is not required for
@@ -30,7 +30,7 @@ pub struct SagaSyncer {
 }
 
 #[derive(Debug, Error)]
-pub enum SagaSyncError {
+enum SagaSyncError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("JSON error: {0}")]

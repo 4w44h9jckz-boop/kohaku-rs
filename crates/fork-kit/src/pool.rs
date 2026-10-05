@@ -4,7 +4,7 @@ use alloy::{
     primitives::{Address, U256},
     providers::{DynProvider, Provider},
 };
-use kohaku_tornadocash::{asset::Asset, pool::Pool};
+use kohaku_tornadocash::{Asset, Pool};
 
 mod sol {
     #![allow(clippy::all)]
