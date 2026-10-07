@@ -1,5 +1,7 @@
 #![doc = include_str!("../README.md")]
 
+pub mod withdrawal;
+
 use alloy::primitives::{Address, B256, Bytes, U256};
 use kohaku_merkle_tree::hasher::Hasher;
 use kohaku_tornadocash::{

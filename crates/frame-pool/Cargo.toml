@@ -7,6 +7,7 @@ edition = "2024"
 alloy = { workspace = true }
 anyhow = { workspace = true }
 hex = { workspace = true }
+kohaku-frame-kit = { workspace = true }
 kohaku-merkle-tree = { workspace = true }
 kohaku-tornadocash = { workspace = true }
 rand = { workspace = true }
