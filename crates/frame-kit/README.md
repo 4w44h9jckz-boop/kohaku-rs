@@ -12,8 +12,8 @@ transaction here.
 - `json` and `rpc` (feature `rpc`, on by default): the node's JSON shapes, simulation through
   `ethrex_simulateFrameTransaction`, submission and receipts.
 
-The tests are offline. They re-encode 42 transactions mined on the testnet, by the `exp-frames`
-experiments and by the `kohaku-frame-pool` example (`tests/fixtures/chain/`), to their on-chain
-hashes; check every secp256k1 and P256 signature over the signature hash computed here; settle
-each one to its receipt's `gasUsed`; and match the golden vector in ethrex's
-`scripts/hegota-testnet/frametx.py`.
+The tests are offline. They re-encode 55 transactions mined on the testnet, by the `exp-frames`
+experiments and by the `kohaku-frame-pool` and `kohaku-frame-accounts` examples
+(`tests/fixtures/chain/`), to their on-chain hashes; check every secp256k1 and P256 signature
+over the signature hash computed here; settle each one to its receipt's `gasUsed`; and match the
+golden vector in ethrex's `scripts/hegota-testnet/frametx.py`.

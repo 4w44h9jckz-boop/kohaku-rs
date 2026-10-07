@@ -315,3 +315,29 @@ fn a_sponsor_takes_the_payment_scope_from_the_account() {
     assert_eq!(sponsored.frames[0].flags, approve::EXECUTION);
     assert_eq!(sponsored.frames[1].flags, approve::PAYMENT);
 }
+
+#[test]
+fn the_examples_contracts_are_the_ones_the_experiments_call() {
+    #[derive(Deserialize)]
+    struct Contracts {
+        contracts: Vec<Contract>,
+    }
+    #[derive(Deserialize)]
+    struct Contract {
+        name: String,
+        deploy: alloy::primitives::Bytes,
+    }
+    let json: Contracts = serde_json::from_str(include_str!("../examples/contracts.json")).unwrap();
+    let address = |name: &str| {
+        let c = json.contracts.iter().find(|c| c.name == name).unwrap();
+        kohaku_frame_accounts::contracts::create2_address(
+            &c.deploy[32..],
+            alloy::primitives::B256::from_slice(&c.deploy[..32]),
+        )
+    };
+    let swap_c = mined("0x5c08e5fe");
+    assert_eq!(address("Token A"), target(&swap_c.frames[1]));
+    assert_eq!(address("ToyDex"), target(&swap_c.frames[2]));
+    assert_eq!(address("Token B"), target(&swap_c.frames[3]));
+    assert_eq!(address("tUSD"), TUSD);
+}

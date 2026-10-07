@@ -29,3 +29,18 @@ each experiment again from Rust:
 ```text
 PRIVATE_KEY=0x... cargo run --release -p kohaku-frame-accounts --example <name>
 ```
+
+| Example | Experiment | What it does |
+|---|---|---|
+| `ex01_transfer` | 01, Example 1a | sends ETH from an account with no code, to a new account and then again |
+| `ex02_account_deployment` | 02, Example 1b | a `SimpleAccount` deploys itself at `tx.sender` and sends in the same transaction, then sends on its own |
+| `ex03_atomic_batch` | 03, Example 2 | approve and swap as a batch; a batch whose swap reverts (rolled back, next frame skipped); the same without the flag (a dangling allowance) |
+| `ex04_sponsored` | 04, Example 3 | a user with no ETH: first the funder pays as an `EoaSponsor`, then `TokenSponsor` is paid in tUSD and refunds in its post-op |
+| `ex05_multisig` | 05 | 2-of-3 multisigs, one secp256k1-only and one with a P256 passkey owner, send with two signatures |
+
+The examples reuse the contracts and accounts the experiments deployed: the same code, salts
+and derived keys give the same addresses. A run on 2026-10-07 (blocks 304730 to 304746) sent 13
+transactions, now fixtures in `kohaku-frame-kit`. Every frame used the gas the TypeScript runs
+recorded for the same step. The multisig transfers match exactly (35,622 and 43,554 gas). The
+other totals differ only where the calldata or the existing state differs: other recipients, or
+a slot the earlier run had already created.

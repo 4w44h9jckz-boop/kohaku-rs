@@ -46,7 +46,7 @@ fn fixtures() -> Vec<(String, Fixture)> {
 
 #[test]
 fn there_are_fixtures() {
-    assert_eq!(fixtures().len(), 42);
+    assert_eq!(fixtures().len(), 55);
 }
 
 #[test]

@@ -1,0 +1,113 @@
+{
+  "meta": {
+    "clientVersion": "ethrex/v23.0.0-hegota-testnet-hotfix-4738681427f8c7d2953a91854f8418dc10ad1dc5/x86_64-unknown-linux-gnu/rustc-v1.93.1",
+    "capturedAt": "2026-10-07T09:08:27.176Z"
+  },
+  "tx": {
+    "blobVersionedHashes": [],
+    "blockHash": "0xb8313e728a6a8cdfefa925c48f19a54c37362830a8b333f3901dac4a0f94ac33",
+    "blockNumber": "0x4a662",
+    "chainId": "0x1fcd",
+    "frames": [
+      {
+        "data": "0x",
+        "flags": "0x3",
+        "gasLimit": "0x4e20",
+        "mode": "0x1",
+        "stateGasLimit": "0x0",
+        "to": null,
+        "value": "0x0"
+      },
+      {
+        "data": "0x095ea7b3000000000000000000000000773df329eb6e70a52a4ade970d0c34b17ca367f70000000000000000000000000000000000000000000000008ac7230489e80000",
+        "flags": "0x4",
+        "gasLimit": "0xc350",
+        "mode": "0x2",
+        "stateGasLimit": "0x17e80",
+        "to": "0x8c2c146c8c13c4436b20d7880c07fbeeae304b2a",
+        "value": "0x0"
+      },
+      {
+        "data": "0xd96073cf0000000000000000000000000000000000000000000000008ac7230489e800000000000000000000000000000000000000000000000000008ac7230489e80001",
+        "flags": "0x4",
+        "gasLimit": "0x249f0",
+        "mode": "0x2",
+        "stateGasLimit": "0x2fd00",
+        "to": "0x773df329eb6e70a52a4ade970d0c34b17ca367f7",
+        "value": "0x0"
+      },
+      {
+        "data": "0xa9059cbb0000000000000000000000002fe207c5684d7bb44c174c299f2802dc7644d0ea0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+        "flags": "0x0",
+        "gasLimit": "0xc350",
+        "mode": "0x2",
+        "stateGasLimit": "0x17e80",
+        "to": "0x7f6b1f38f2ae6b5683cdffed8ef35bca3349cc69",
+        "value": "0x0"
+      }
+    ],
+    "from": "0xa93cee06b1e4ffacdf920bd500cb301a39ddeb74",
+    "hash": "0x396093a2574edecbeb28b71073c811e6493be479e1489acb273b2706b42e3909",
+    "maxFeePerBlobGas": "0x0",
+    "maxFeePerGas": "0xf",
+    "maxPriorityFeePerGas": "0x1",
+    "nonceKeys": [
+      "0x0"
+    ],
+    "nonceSeq": "0x28",
+    "sender": "0xa93cee06b1e4ffacdf920bd500cb301a39ddeb74",
+    "signatures": [
+      {
+        "msg": "0x",
+        "scheme": "0x1",
+        "signature": "0x003441ee4a90fae18ec477faa65f6b2a6acd388808e199315a4b622a32fab825766b12ed76139bef4433dceea9a84cbbca166f7b0cff216cb876e923995375dd25",
+        "signer": null
+      }
+    ],
+    "transactionIndex": "0x0",
+    "type": "0x6"
+  },
+  "receipt": {
+    "blockHash": "0xb8313e728a6a8cdfefa925c48f19a54c37362830a8b333f3901dac4a0f94ac33",
+    "blockNumber": "0x4a662",
+    "contractAddress": null,
+    "cumulativeGasUsed": "0x9e51",
+    "effectiveGasPrice": "0x8",
+    "frameReceipts": [
+      {
+        "gasUsed": "0x64",
+        "logs": [],
+        "stateGasUsed": "0x0",
+        "status": "0x1"
+      },
+      {
+        "gasUsed": "0x446f",
+        "logs": [],
+        "stateGasUsed": "0x0",
+        "status": "0x1"
+      },
+      {
+        "gasUsed": "0xd42",
+        "logs": [],
+        "stateGasUsed": "0x0",
+        "status": "0x0"
+      },
+      {
+        "gasUsed": "0x0",
+        "logs": [],
+        "stateGasUsed": "0x0",
+        "status": "0x2"
+      }
+    ],
+    "from": "0xa93cee06b1e4ffacdf920bd500cb301a39ddeb74",
+    "gasUsed": "0x9e51",
+    "logs": [],
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "payer": "0xa93cee06b1e4ffacdf920bd500cb301a39ddeb74",
+    "status": "0x0",
+    "to": null,
+    "transactionHash": "0x396093a2574edecbeb28b71073c811e6493be479e1489acb273b2706b42e3909",
+    "transactionIndex": "0x0",
+    "type": "0x6"
+  }
+}
