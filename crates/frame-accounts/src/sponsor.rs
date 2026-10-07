@@ -172,7 +172,7 @@ impl TokenSponsor {
 
 /// The transaction as it will be once signed, for pricing: an empty signature is as long as its
 /// scheme's, so the calldata it adds is paid for.
-fn signed_worst_case(tx: &FrameTx) -> FrameTx {
+pub(crate) fn signed_worst_case(tx: &FrameTx) -> FrameTx {
     let mut tx = tx.clone();
     for s in &mut tx.signatures {
         if s.signature.is_empty() {

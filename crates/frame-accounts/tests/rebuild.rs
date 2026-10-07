@@ -1,4 +1,4 @@
-//! Transactions `exp-frames` experiments 01 to 05, 09 and 10 mined on the ethrex Hegota testnet,
+//! Transactions `exp-frames` experiments 01 to 05, 09, 10 and 12 mined on the ethrex Hegota testnet,
 //! laid out again with this crate from what they were built from, and compared byte for byte.
 //!
 //! Keys are not in the repository, so each rebuilt transaction takes its signature bytes from the
@@ -8,8 +8,8 @@ use std::{fs, path::Path};
 
 use alloy::primitives::{Address, U256, address};
 use kohaku_frame_accounts::{
-    CanonicalPaymaster, Envelope, Eoa, EoaSponsor, FrameAccount, Multisig, MultisigSponsor, Signer,
-    SimpleAccount, TokenSponsor, TxPlan,
+    CanonicalPaymaster, Envelope, Eoa, EoaSponsor, FrameAccount, Multisig, MultisigSponsor,
+    SessionAccount, SessionPolicy, Signer, SimpleAccount, TokenSponsor, TxPlan,
     builder::BuildError,
     calls,
     contracts::{
@@ -543,4 +543,89 @@ fn the_canonical_paymaster_cannot_pay_for_a_multisig() {
         .build(&env)
         .unwrap_err();
     assert!(matches!(err, BuildError::EntryIndex { needs: 1, has: 2 }));
+}
+
+// ---- 12: session keys ----
+
+const OWNER: Address = address!("0xb66e53f7394a5069933103cad898194181f8574e");
+const SESSION: Address = address!("0xc549c8fdafd2ef85a758d04f7a5d77249d62cc28");
+const MERCHANT: Address = address!("0x336d9de562e6f9cbbd3d49be3a4810a854173e47");
+
+fn session_account() -> SessionAccount {
+    SessionAccount::new(OWNER, salt_of("exp-frames/12/session-account/v1"))
+}
+
+#[test]
+fn ex12_the_funder_deploys_and_funds_the_session_account() {
+    let account = session_account();
+    assert_eq!(
+        account.address(),
+        address!("0x49f30d74edd539cdb026bd05f05b9359c719276a")
+    );
+    let m = mined("0x922d2f82");
+    let built = TxPlan::new(&funder())
+        .call(account.deploy_frame())
+        .call(calls::eth_transfer(
+            account.address(),
+            U256::from(10_000_000_000_000_000u64),
+            true,
+        ))
+        .build(&envelope(&m))
+        .unwrap();
+    assert_rebuilds(built, &m);
+}
+
+#[test]
+fn ex12_the_owner_grants_and_revokes_a_session() {
+    let account = session_account();
+    let m = mined("0x3650463d");
+    let data = &m.frames[1].data;
+    let policy = SessionPolicy {
+        target: MERCHANT,
+        selector: [0; 4],
+        valid_until: u64::from_be_bytes(data[45..53].try_into().unwrap()),
+        budget: 2_000_000_000_000_000,
+    };
+    let built = TxPlan::new(&account)
+        .call(account.add_session(SESSION, &policy))
+        .build(&envelope(&m))
+        .unwrap();
+    assert_rebuilds(built, &m);
+
+    // D revokes; E revokes by replacing a pending session transaction, at fees 25% higher.
+    for hash in ["0x822694c8", "0x5cd226e7"] {
+        let m = mined(hash);
+        let built = TxPlan::new(&account)
+            .call(account.revoke_session(SESSION))
+            .build(&envelope(&m))
+            .unwrap();
+        assert_rebuilds(built, &m);
+    }
+}
+
+#[test]
+fn ex12_a_session_key_pays_the_merchant() {
+    // A; the first run's A, whose payment ran out of gas and whose spend was still recorded;
+    // and B, two payments in one transaction.
+    let account = session_account();
+    for (hash, values) in [
+        ("0x1d381c94", &[100_000_000_000_000u64][..]),
+        ("0x7f53ae0c", &[100_000_000_000_000]),
+        ("0x84d4a91f", &[100_000_000_000_000, 200_000_000_000_000]),
+    ] {
+        let m = mined(hash);
+        let deadline = u64::from_be_bytes(m.frames[0].data[..].try_into().unwrap());
+        let calls: Vec<Frame> = values
+            .iter()
+            .map(|v| {
+                Frame::sender(Some(MERCHANT))
+                    .with_value(U256::from(*v))
+                    .with_execution(50_000)
+            })
+            .collect();
+        let built = account
+            .session_tx(Signer::secp256k1(SESSION), &calls, deadline, &envelope(&m))
+            .unwrap();
+        assert_rebuilds(built, &m);
+    }
 }

@@ -166,7 +166,7 @@ impl<'a> TxPlan<'a> {
 /// The nonce is incremented where payment is approved, so a fresh key's slot is charged there:
 /// to the account's `VERIFY` when it pays for itself (`exp-frames` experiments 01 and 08), to the
 /// sponsor's `VERIFY(PAYMENT)` when someone else pays (experiment 16).
-fn charge_fresh_nonce_keys(frames: &mut [Frame], fresh: usize) {
+pub(crate) fn charge_fresh_nonce_keys(frames: &mut [Frame], fresh: usize) {
     let Some(payer) = frames
         .iter_mut()
         .find(|f| f.mode == mode::VERIFY && f.flags & approve::PAYMENT != 0)

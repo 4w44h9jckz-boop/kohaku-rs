@@ -35,6 +35,13 @@ pub fn token_sponsor_code() -> Vec<u8> {
     code(include_str!("../contracts/TokenSponsor.hex"))
 }
 
+/// `SessionAccount.yul`: an owner, and session keys limited to one target, one selector, a
+/// deadline and a budget. Initcode: code `||` owner, as a 32-byte word.
+#[must_use]
+pub fn session_account_code() -> Vec<u8> {
+    code(include_str!("../contracts/SessionAccount.hex"))
+}
+
 /// `CanonicalPaymaster.yul`: an instance of the EIP-8141 canonical paymaster, ethereum/EIPs#12041
 /// as ethrex pins it. Initcode: code `||` signer, as a 32-byte word. The constructor writes the
 /// signer to slot 0 and returns the PR's 355-byte runtime verbatim.
