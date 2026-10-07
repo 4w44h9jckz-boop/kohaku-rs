@@ -1,0 +1,23 @@
+[package]
+name = "kohaku-frame-kit"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["rpc"]
+rpc = ["dep:tokio"]
+
+[dependencies]
+alloy = { workspace = true, features = ["rlp", "signers", "signer-local"] }
+p256 = { version = "0.13", features = ["ecdsa"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"], optional = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+rand = { workspace = true }
+
+[lints]
+workspace = true
