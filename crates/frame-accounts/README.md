@@ -6,10 +6,15 @@ ERC-4337, with no `EntryPoint`, bundler or deposit: an account is a `VERIFY` fra
 another `VERIFY` frame, and a call is a `SENDER` frame.
 
 - `account`: who `tx.sender` is and how it approves.
-  - `Eoa`: no code; the protocol's default code checks a secp256k1 or P256 signature by the
-    sender.
+  - `Eoa`: no code; the protocol's default code checks a secp256k1 signature by the sender. It
+    accepts no other scheme.
   - `SimpleAccount`: one secp256k1 owner, counterfactual, able to deploy itself in its first
     transaction (the EIP's Example 1b).
+  - `P256Account`: `SimpleAccount` with a P256 owner, for a key that signs any digest it is
+    given (the Secure Enclave, Android Keystore, an HSM). The protocol checks the signature.
+  - `WebAuthnAccount`: a browser passkey, whose `WebAuthn` assertion travels in an `ARBITRARY`
+    entry and is checked by the account. `Assertion` takes the browser's response, checks it as
+    the account will, and encodes the entry with a low `s`.
   - `Multisig`: k of n secp256k1 or P256 owners.
   - `SessionAccount`: one owner, plus session keys the owner grants. A session may call one
     target with one selector until a deadline, within a budget in wei that counts value and
@@ -30,8 +35,8 @@ another `VERIFY` frame, and a call is a `SENDER` frame.
 - `calls` and `contracts`: common calls with the state gas they need, and the account and
   sponsor contracts with CREATE2 deployment. The Yul sources are in `contracts/`.
 
-These are the contracts and layouts of the `exp-frames` experiments 01 to 05, 09, 10 and 12.
-The tests rebuild 34 transactions those experiments mined on the ethrex Hegota testnet byte for
+These are the contracts and layouts of the `exp-frames` experiments 01 to 05 and 09 to 12. The
+tests rebuild 38 transactions those experiments mined on the ethrex Hegota testnet byte for
 byte, and 3 more frame for frame, where the experiment named a signer this crate leaves
 implicit. They also check that the embedded contract code lands at the addresses the testnet
 has it at, and that the canonical paymaster's runtime hashes to the pinned value. The examples
@@ -60,6 +65,8 @@ a slot the earlier run had already created.
 
 | Rule | Where | From |
 |---|---|---|
+| The default code accepts a secp256k1 entry only, so a P256 key's own address cannot send until code is there | `Eoa`, `P256Account` | experiment 11 |
+| A browser passkey signs a `WebAuthn` envelope, never the signature hash, so its assertion goes in an `ARBITRARY` entry the account checks; that entry is outside the signature hash, so only one encoding of it may be accepted | `WebAuthnAccount`, `Assertion::encode` | experiment 11 |
 | A deadline is a `VERIFY` frame on `0x8141` with 8 bytes of data, first in the transaction. It costs 3,051 gas, and 3,050 runs out | `TxPlan::expires_at` | experiment 10 |
 | A nonce key's first use creates a 64-byte slot, charged to the frame that approves payment | `Envelope::fresh_nonce_keys`, the builder | experiments 01, 08 and 16 |
 | The canonical paymaster is recognised by its code hash alone. Every other payer, a code-less sponsor included, is held to one pending transaction | `CanonicalPaymaster`, `contracts::is_canonical_paymaster` | experiment 09 |

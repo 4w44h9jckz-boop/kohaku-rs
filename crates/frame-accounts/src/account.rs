@@ -8,7 +8,8 @@ use alloy::primitives::{Address, B256, U256};
 use kohaku_frame_kit::{Frame, FrameSignature, FrameSigner, constants::scheme};
 
 use crate::contracts::{
-    create2_address, deploy_frame, multisig_code, self_deploy_frame, simple_account_code, word,
+    create2_address, deploy_frame, multisig_code, p256_account_code, self_deploy_frame,
+    simple_account_code, word,
 };
 
 /// A transaction sender.
@@ -72,8 +73,9 @@ impl From<&FrameSigner> for Signer {
 }
 
 /// An account with no code, validated by the protocol's default code: signature entry 0 must be
-/// by `tx.sender` itself. A secp256k1 key's address is the usual one; a P256 key's is
-/// `keccak256(qx || qy)[12..]`.
+/// a secp256k1 signature by `tx.sender` itself. The default code accepts no other scheme, so a
+/// P256 key's own address, `keccak256(qx || qy)[12..]`, cannot send until code is deployed there
+/// (`exp-frames` experiment 11): use [`P256Account`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Eoa {
     pub key: Signer,
@@ -170,6 +172,70 @@ impl FrameAccount for SimpleAccount {
 
     fn signature_entries(&self) -> Vec<FrameSignature> {
         vec![Signer::secp256k1(self.owner).entry(Some(self.owner))]
+    }
+}
+
+/// `P256Account.yul` (experiment 11): [`SimpleAccount`] with a P256 owner, for a key that signs
+/// whatever digest it is given, such as the Secure Enclave, Android Keystore or an HSM. The
+/// protocol checks the P256 signature (scheme `0x2`) before any frame runs; the account checks
+/// with `SIGPARAM` that its signer is the owner, `keccak256(qx || qy)[12..]`. Its `VERIFY` used
+/// 288 gas. A browser passkey signs a `WebAuthn` envelope rather than a digest, and needs
+/// [`crate::WebAuthnAccount`] instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct P256Account {
+    pub owner: Address,
+    pub salt: B256,
+    /// `false` puts the deployment in front of `VERIFY` (Example 1b with a P256 owner).
+    pub deployed: bool,
+    pub verify_execution: u64,
+}
+
+impl P256Account {
+    pub const VERIFY_EXECUTION: u64 = 20_000;
+
+    #[must_use]
+    pub fn new(owner: Address, salt: B256) -> Self {
+        Self {
+            owner,
+            salt,
+            deployed: false,
+            verify_execution: Self::VERIFY_EXECUTION,
+        }
+    }
+
+    #[must_use]
+    pub fn deployed(mut self, deployed: bool) -> Self {
+        self.deployed = deployed;
+        self
+    }
+
+    #[must_use]
+    pub fn initcode(&self) -> Vec<u8> {
+        let mut code = p256_account_code();
+        code.extend_from_slice(&word(self.owner));
+        code
+    }
+}
+
+impl FrameAccount for P256Account {
+    fn address(&self) -> Address {
+        create2_address(&self.initcode(), self.salt)
+    }
+
+    fn deploy_frames(&self) -> Vec<Frame> {
+        if self.deployed {
+            Vec::new()
+        } else {
+            vec![self_deploy_frame(&self.initcode(), self.salt)]
+        }
+    }
+
+    fn verify_frame(&self, scope: u8) -> Frame {
+        Frame::verify(scope, None).with_execution(self.verify_execution)
+    }
+
+    fn signature_entries(&self) -> Vec<FrameSignature> {
+        vec![Signer::p256(self.owner).entry(Some(self.owner))]
     }
 }
 

@@ -11,11 +11,12 @@ rpc = ["kohaku-frame-kit/rpc"]
 alloy = { workspace = true }
 hex = { workspace = true }
 kohaku-frame-kit = { workspace = true }
+p256 = { version = "0.13", features = ["ecdsa"] }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
-p256 = { version = "0.13", features = ["ecdsa"] }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

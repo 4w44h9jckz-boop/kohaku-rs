@@ -1,4 +1,4 @@
-//! Transactions `exp-frames` experiments 01 to 05, 09, 10 and 12 mined on the ethrex Hegota testnet,
+//! Transactions `exp-frames` experiments 01 to 05 and 09 to 12 mined on the ethrex Hegota testnet,
 //! laid out again with this crate from what they were built from, and compared byte for byte.
 //!
 //! Keys are not in the repository, so each rebuilt transaction takes its signature bytes from the
@@ -6,10 +6,11 @@
 
 use std::{fs, path::Path};
 
-use alloy::primitives::{Address, U256, address};
+use alloy::primitives::{Address, B256, U256, address, b256};
 use kohaku_frame_accounts::{
-    CanonicalPaymaster, Envelope, Eoa, EoaSponsor, FrameAccount, Multisig, MultisigSponsor,
-    SessionAccount, SessionPolicy, Signer, SimpleAccount, TokenSponsor, TxPlan,
+    Assertion, AssertionError, CanonicalPaymaster, Envelope, Eoa, EoaSponsor, FrameAccount,
+    Multisig, MultisigSponsor, P256Account, SessionAccount, SessionPolicy, Signer, SimpleAccount,
+    TokenSponsor, TxPlan, WebAuthnAccount,
     builder::BuildError,
     calls,
     contracts::{
@@ -628,4 +629,182 @@ fn ex12_a_session_key_pays_the_merchant() {
             .unwrap();
         assert_rebuilds(built, &m);
     }
+}
+
+// ---- 11: passkeys ----
+
+/// The raw P256 key of experiment 11, its address, and the browser passkey's public key.
+const RAW_QX: B256 = b256!("0xce68cae24e1301af81cfb8f716d8c59c115e03d50ce4cd25cfc8bf0db10d38b0");
+const RAW_QY: B256 = b256!("0x985ab5c54c1b10146f374abc295542d7a0976ac50046337073909f6e48dab871");
+const RAW_OWNER: Address = address!("0x7726d71fc78b51184a96b91bde7d22fabed913f0");
+const PASSKEY_QX: B256 =
+    b256!("0x118094a832968f8e17803ddc66e102d060c6bde282bbdb507687587d930c752d");
+const PASSKEY_QY: B256 =
+    b256!("0x756bf598bca886bf2cd23e375ab7e38371dbae4607cc203e7ead47acb5a83efc");
+const TENTH_MILLI_ETH: u64 = 100_000_000_000_000;
+
+fn p256_account() -> P256Account {
+    P256Account::new(RAW_OWNER, salt_of("exp-frames/11/p256-account/v1"))
+}
+
+fn webauthn_account() -> WebAuthnAccount {
+    WebAuthnAccount::new(
+        PASSKEY_QX,
+        PASSKEY_QY,
+        salt_of("exp-frames/11/webauthn-account/v1"),
+    )
+}
+
+#[test]
+fn ex11_setup_funds_a_p256_address_and_deploys_a_webauthn_account() {
+    let (raw, passkey) = (p256_account(), webauthn_account());
+    assert_eq!(
+        raw.address(),
+        address!("0xbbbfff4996acd7ee3149650c23ddc659a617d364")
+    );
+    assert_eq!(
+        passkey.address(),
+        address!("0x2e59bb48207484186adb97bbefbc765e01dd37ba")
+    );
+    let m = mined("0xce4c72f4");
+    let funding = U256::from(10_000_000_000_000_000u64);
+    let built = TxPlan::new(&funder())
+        .call(calls::eth_transfer(raw.address(), funding, false))
+        .call(passkey.deploy_frame())
+        .call(calls::eth_transfer(passkey.address(), funding, true))
+        .build(&envelope(&m))
+        .unwrap();
+    assert_rebuilds(built, &m);
+}
+
+#[test]
+fn ex11_a_p256_account_deploys_itself_then_sends() {
+    // The protocol checks the P256 signature; the account only checks who signed.
+    for (hash, deployed) in [("0x0db33e7d", false), ("0x380b7d11", true)] {
+        let m = mined(hash);
+        let built = TxPlan::new(&p256_account().deployed(deployed))
+            .call(calls::eth_transfer(
+                FUNDER,
+                U256::from(TENTH_MILLI_ETH),
+                true,
+            ))
+            .build(&envelope(&m))
+            .unwrap();
+        assert_rebuilds(built, &m);
+        assert_eq!(&m.signatures[0].signature[64..96], RAW_QX.as_slice());
+        assert_eq!(&m.signatures[0].signature[96..], RAW_QY.as_slice());
+    }
+}
+
+/// Experiment 11's C: the passkey's assertion, in the `ARBITRARY` entry, split back into what a
+/// browser returns.
+fn mined_assertion(m: &FrameTx) -> Assertion {
+    let e = &m.signatures[0].signature;
+    let auth_len = usize::from(u16::from_be_bytes([e[0], e[1]]));
+    let client_end = e.len() - 64;
+    Assertion {
+        authenticator_data: e.slice(6..6 + auth_len),
+        client_data_json: e.slice(6 + auth_len..client_end),
+        r: U256::from_be_slice(&e[client_end..client_end + 32]),
+        s: U256::from_be_slice(&e[client_end + 32..]),
+    }
+}
+
+#[test]
+fn ex11_a_passkey_pays_with_a_webauthn_assertion() {
+    let account = webauthn_account();
+    let m = mined("0xc408bec9");
+    let built = TxPlan::new(&account)
+        .call(calls::eth_transfer(
+            FUNDER,
+            U256::from(TENTH_MILLI_ETH),
+            true,
+        ))
+        .build(&envelope(&m))
+        .unwrap();
+    assert_rebuilds(built, &m);
+
+    // The entry the account accepted is what this crate encodes from the browser's response,
+    // checked against this crate's signature hash and the passkey's key.
+    let assertion = mined_assertion(&m);
+    assert_eq!(
+        account.entry(&assertion, m.sig_hash()).unwrap(),
+        m.signatures[0].signature
+    );
+    let der = p256::ecdsa::Signature::from_scalars(
+        assertion.r.to_be_bytes::<32>(),
+        assertion.s.to_be_bytes::<32>(),
+    )
+    .unwrap()
+    .to_der();
+    let from_browser = Assertion::from_der(
+        assertion.authenticator_data.clone(),
+        assertion.client_data_json.clone(),
+        der.as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(from_browser, assertion);
+}
+
+#[test]
+fn ex11_what_the_webauthn_account_refuses_is_refused_before_sending() {
+    let account = webauthn_account();
+    let m = mined("0xc408bec9");
+    let assertion = mined_assertion(&m);
+    let hash = m.sig_hash();
+
+    // The high-s form verifies too; it is encoded as the low form the account accepts.
+    let n = U256::from_be_slice(
+        &hex::decode("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551").unwrap(),
+    );
+    let high = Assertion {
+        s: n - assertion.s,
+        ..assertion.clone()
+    };
+    assert_eq!(
+        account.entry(&high, hash).unwrap(),
+        m.signatures[0].signature
+    );
+
+    // Another transaction's challenge.
+    assert_eq!(
+        account.entry(&assertion, B256::ZERO),
+        Err(AssertionError::Challenge)
+    );
+    // The user-presence flag cleared.
+    let mut auth = assertion.authenticator_data.to_vec();
+    auth[32] &= !0x01;
+    let absent = Assertion {
+        authenticator_data: auth.into(),
+        ..assertion.clone()
+    };
+    assert_eq!(
+        account.entry(&absent, hash),
+        Err(AssertionError::UserPresence)
+    );
+    // A registration rather than an assertion.
+    let json = String::from_utf8(assertion.client_data_json.to_vec()).unwrap();
+    let create = Assertion {
+        client_data_json: json
+            .replace("webauthn.get", "webauthn.create")
+            .into_bytes()
+            .into(),
+        ..assertion.clone()
+    };
+    assert_eq!(account.entry(&create, hash), Err(AssertionError::Type));
+    // The origin edited after signing.
+    let edited = Assertion {
+        client_data_json: json
+            .replace("exp-frames.test", "exp-frames.evil")
+            .into_bytes()
+            .into(),
+        ..assertion.clone()
+    };
+    assert_eq!(account.entry(&edited, hash), Err(AssertionError::Signature));
+    // Another passkey: experiment 11's raw P256 key.
+    let stranger = WebAuthnAccount::new(RAW_QX, RAW_QY, account.salt);
+    assert_eq!(
+        stranger.entry(&assertion, hash),
+        Err(AssertionError::Signature)
+    );
 }

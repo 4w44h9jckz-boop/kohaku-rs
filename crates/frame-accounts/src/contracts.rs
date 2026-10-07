@@ -21,6 +21,20 @@ pub fn simple_account_code() -> Vec<u8> {
     code(include_str!("../contracts/SimpleAccount.hex"))
 }
 
+/// `P256Account.yul`: `SimpleAccount.yul` with a P256 owner, `keccak256(qx || qy)[12..]`, checked
+/// with `SIGPARAM`. Initcode: code `||` owner, as a 32-byte word.
+#[must_use]
+pub fn p256_account_code() -> Vec<u8> {
+    code(include_str!("../contracts/P256Account.hex"))
+}
+
+/// `WebAuthnAccount.yul`: a passkey owner whose `WebAuthn` assertion the account checks itself,
+/// with the SHA-256 and `P256VERIFY` precompiles. Initcode: code `||` qx `||` qy.
+#[must_use]
+pub fn webauthn_account_code() -> Vec<u8> {
+    code(include_str!("../contracts/WebAuthnAccount.hex"))
+}
+
 /// `Multisig.yul`: k of n secp256k1 or P256 owners, counted with `SIGPARAM`. Initcode: code `||`
 /// owners `||` n `||` k, as 32-byte words.
 #[must_use]
