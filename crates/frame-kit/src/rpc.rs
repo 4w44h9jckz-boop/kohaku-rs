@@ -147,6 +147,48 @@ pub async fn wait_for_receipt<P: Provider>(
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct BlockRef {
+    hash: B256,
+}
+
+/// The hash of the block the node holds at `number`, if any.
+async fn block_hash_at<P: Provider>(provider: &P, number: U256) -> Result<Option<B256>, RpcError> {
+    let block: Option<BlockRef> = provider
+        .raw_request("eth_getBlockByNumber".into(), (number, false))
+        .await?;
+    Ok(block.map(|b| b.hash))
+}
+
+/// Poll until the receipt names a block that has a child and is the node's block at its
+/// height, then return that receipt.
+///
+/// The first receipt is provisional. `exp-frames` experiment 19 caught ethrex serving one from a
+/// block it had built for a slot that was then missed, and including the transaction again one
+/// slot later, in a different block at the same height. A transaction that depends on this one
+/// (the next nonce on another key, funds it moved) should be sent after this returns, not after
+/// [`wait_for_receipt`].
+pub async fn wait_for_confirmed_receipt<P: Provider>(
+    provider: &P,
+    hash: B256,
+    timeout: Duration,
+    poll: Duration,
+) -> Result<FrameTxReceiptJson, RpcError> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if let Some(r) = receipt(provider, hash).await? {
+            let built_on = U256::from(provider.get_block_number().await?) > r.block_number;
+            if built_on && block_hash_at(provider, r.block_number).await? == Some(r.block_hash) {
+                return Ok(r);
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(RpcError::Timeout(hash, timeout));
+        }
+        tokio::time::sleep(poll).await;
+    }
+}
+
 /// What [`execute`] saw: the node's simulation, then the mined receipt.
 #[derive(Debug, Clone)]
 pub struct Executed {
@@ -165,7 +207,8 @@ pub enum ExecuteError {
     Reverts(String),
 }
 
-/// Simulate, refuse what the node would not admit, send, and wait for the receipt.
+/// Simulate, refuse what the node would not admit, send, and wait for the receipt to be built on
+/// ([`wait_for_confirmed_receipt`]).
 ///
 /// A valid transaction can still revert a frame. With `require_success`, one that reverts in
 /// simulation is not sent; without it, it is sent anyway, which is what an experiment about
@@ -187,7 +230,7 @@ pub async fn execute<P: Provider>(
         ));
     }
     let hash = send(provider, tx).await?;
-    let receipt = wait_for_receipt(
+    let receipt = wait_for_confirmed_receipt(
         provider,
         hash,
         Duration::from_mins(2),

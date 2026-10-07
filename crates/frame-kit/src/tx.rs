@@ -127,6 +127,25 @@ pub struct Fees {
     pub max_fee_per_blob_gas: u128,
 }
 
+impl Fees {
+    /// The lowest fees a replacement at the same nonce may offer: the tip and the max fee each
+    /// up by 10%, rounded up.
+    ///
+    /// `exp-frames` experiment 19 found ethrex's pool applying exactly this. Both fees +10% was
+    /// accepted; +9%, +9.98%, and either fee alone (even at +100%) were refused as
+    /// underpriced. The blob fee is left as it is: no experiment replaced a transaction that
+    /// carries blobs.
+    #[must_use]
+    pub fn bumped(self) -> Self {
+        let up = |fee: u128| fee.saturating_add(fee.div_ceil(10));
+        Self {
+            max_priority_fee_per_gas: up(self.max_priority_fee_per_gas),
+            max_fee_per_gas: up(self.max_fee_per_gas),
+            max_fee_per_blob_gas: self.max_fee_per_blob_gas,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FrameTx {
     pub chain_id: u64,

@@ -6,14 +6,19 @@ It is to frame transactions what `kohaku-userop-kit` is to ERC-4337 user operati
 much smaller, because the account, the paymaster and the bundler of 4337 are all frames of one
 transaction here.
 
-- `tx`: the envelope, its RLP in both directions, the transaction hash and the signature hash.
+- `tx`: the envelope, its RLP in both directions, the transaction hash and the signature hash;
+  `Fees::bumped` for a replacement, which ethrex accepts only when both fees rise by 10%.
 - `gas`: intrinsic gas, the calldata floor, `max_cost` and settlement from frame receipts.
 - `sign`: secp256k1 and P256 signing, with the ordering several signers need.
 - `json` and `rpc` (feature `rpc`, on by default): the node's JSON shapes, simulation through
-  `ethrex_simulateFrameTransaction`, submission and receipts.
+  `ethrex_simulateFrameTransaction`, submission and receipts. `execute` returns only once a block
+  has been built on the receipt's block (`wait_for_confirmed_receipt`): ethrex can serve a receipt
+  from a block it then replaces.
 
 The tests are offline. They re-encode 55 transactions mined on the testnet, by the `exp-frames`
 experiments and by the `kohaku-frame-pool` and `kohaku-frame-accounts` examples
 (`tests/fixtures/chain/`), to their on-chain hashes; check every secp256k1 and P256 signature
 over the signature hash computed here; settle each one to its receipt's `gasUsed`; and match the
-golden vector in ethrex's `scripts/hegota-testnet/frametx.py`.
+golden vector in ethrex's `scripts/hegota-testnet/frametx.py`. `tests/mempool.rs` checks the
+replacement rule and the receipt rule, both from `exp-frames` experiment 19, against a mocked
+node.
