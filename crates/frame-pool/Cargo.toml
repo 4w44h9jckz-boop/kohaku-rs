@@ -1,0 +1,19 @@
+[package]
+name = "kohaku-frame-pool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy = { workspace = true }
+anyhow = { workspace = true }
+hex = { workspace = true }
+kohaku-merkle-tree = { workspace = true }
+kohaku-tornadocash = { workspace = true }
+rand = { workspace = true }
+ruint = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

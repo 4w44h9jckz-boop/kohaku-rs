@@ -3733,6 +3733,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "kohaku-frame-pool"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "hex",
+ "kohaku-merkle-tree",
+ "kohaku-tornadocash",
+ "rand 0.10.2",
+ "ruint",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "kohaku-merkle-tree"
 version = "0.1.0"
 dependencies = [
