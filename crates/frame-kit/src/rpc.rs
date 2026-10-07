@@ -146,3 +146,57 @@ pub async fn wait_for_receipt<P: Provider>(
         tokio::time::sleep(poll).await;
     }
 }
+
+/// What [`execute`] saw: the node's simulation, then the mined receipt.
+#[derive(Debug, Clone)]
+pub struct Executed {
+    pub simulation: SimulateResult,
+    pub hash: B256,
+    pub receipt: FrameTxReceiptJson,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ExecuteError {
+    #[error(transparent)]
+    Rpc(#[from] RpcError),
+    #[error("the node would not admit it: {0}")]
+    Invalid(String),
+    #[error("a frame reverts in simulation: {0}")]
+    Reverts(String),
+}
+
+/// Simulate, refuse what the node would not admit, send, and wait for the receipt.
+///
+/// A valid transaction can still revert a frame. With `require_success`, one that reverts in
+/// simulation is not sent; without it, it is sent anyway, which is what an experiment about
+/// reverting frames wants.
+pub async fn execute<P: Provider>(
+    provider: &P,
+    tx: &FrameTx,
+    require_success: bool,
+) -> Result<Executed, ExecuteError> {
+    let simulation = simulate(provider, tx, "latest").await?;
+    if !simulation.valid {
+        return Err(ExecuteError::Invalid(
+            simulation.violation.clone().unwrap_or_default(),
+        ));
+    }
+    if require_success && simulation.execution_status.as_deref() != Some("success") {
+        return Err(ExecuteError::Reverts(
+            simulation.execution_error.clone().unwrap_or_default(),
+        ));
+    }
+    let hash = send(provider, tx).await?;
+    let receipt = wait_for_receipt(
+        provider,
+        hash,
+        Duration::from_mins(2),
+        Duration::from_secs(2),
+    )
+    .await?;
+    Ok(Executed {
+        simulation,
+        hash,
+        receipt,
+    })
+}
