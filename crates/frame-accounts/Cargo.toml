@@ -1,0 +1,25 @@
+[package]
+name = "kohaku-frame-accounts"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["rpc"]
+rpc = ["kohaku-frame-kit/rpc"]
+
+[dependencies]
+alloy = { workspace = true }
+hex = { workspace = true }
+kohaku-frame-kit = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+p256 = { version = "0.13", features = ["ecdsa"] }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
