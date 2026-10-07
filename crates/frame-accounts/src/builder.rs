@@ -1,15 +1,23 @@
 //! Laying out a transaction: the account, then its sponsor, then the calls.
 //!
 //! ```text
+//! [expiry]  the expiry verifier, if the transaction has a deadline: always the first frame
 //! [deploy]  account deploys itself at tx.sender, if it is not there yet (Example 1b)
 //! VERIFY    the account: EXECUTION_AND_PAYMENT, or EXECUTION when sponsored
 //! [payment] the sponsor's VERIFY(PAYMENT), and whatever it needs next to it
 //! calls     SENDER frames, as the account
 //! [post]    the sponsor's post-op
 //! ```
+//!
+//! The frame that approves payment, the account's `VERIFY` or the sponsor's, also carries the
+//! state gas for any EIP-8250 nonce key the transaction uses for the first time.
 
 use alloy::primitives::U256;
-use kohaku_frame_kit::{Fees, Frame, FrameTx, constants::approve, gas::UnknownScheme};
+use kohaku_frame_kit::{
+    Fees, Frame, FrameTx,
+    constants::{STORAGE_SET_STATE_GAS, approve, mode},
+    gas::UnknownScheme,
+};
 
 use crate::{account::FrameAccount, sponsor::Sponsor};
 
@@ -21,6 +29,21 @@ pub struct Envelope {
     pub nonce_keys: Vec<U256>,
     pub nonce_seq: u64,
     pub fees: Fees,
+}
+
+impl Envelope {
+    /// How many keys this envelope uses for the first time. Every key in a set sits at the same
+    /// sequence, so at sequence 0 each non-zero key's `NONCE_MANAGER` slot is still empty, and
+    /// the transaction creates it: 97,920 state gas a key on this chain. Key 0 is the account
+    /// nonce and has no slot.
+    #[must_use]
+    pub fn fresh_nonce_keys(&self) -> usize {
+        if self.nonce_seq == 0 {
+            self.nonce_keys.iter().filter(|k| !k.is_zero()).count()
+        } else {
+            0
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +59,7 @@ pub struct TxPlan<'a> {
     account: &'a dyn FrameAccount,
     sponsor: Option<&'a mut dyn Sponsor>,
     calls: Vec<Frame>,
+    deadline: Option<u64>,
 }
 
 impl<'a> TxPlan<'a> {
@@ -45,7 +69,20 @@ impl<'a> TxPlan<'a> {
             account,
             sponsor: None,
             calls: Vec::new(),
+            deadline: None,
         }
+    }
+
+    /// Put an expiry verifier frame first: the transaction is invalid once
+    /// `block.timestamp > deadline`, and the mempool drops it then.
+    ///
+    /// `exp-frames` experiment 10 measured the frame at 3,051 execution gas, nearly all of it
+    /// the cold access to the verifier, so [`Frame::expiry`]'s 5,000 leaves a margin; 3,050 was
+    /// refused. The node refuses the frame anywhere but first.
+    #[must_use]
+    pub fn expires_at(mut self, deadline: u64) -> Self {
+        self.deadline = Some(deadline);
+        self
     }
 
     #[must_use]
@@ -70,7 +107,8 @@ impl<'a> TxPlan<'a> {
 
     fn layout(&self, envelope: &Envelope) -> FrameTx {
         let sponsor = self.sponsor.as_deref();
-        let mut frames = self.account.deploy_frames();
+        let mut frames: Vec<Frame> = self.deadline.map(Frame::expiry).into_iter().collect();
+        frames.extend(self.account.deploy_frames());
         let scope = if sponsor.is_some() {
             approve::EXECUTION
         } else {
@@ -86,6 +124,7 @@ impl<'a> TxPlan<'a> {
         if let Some(s) = sponsor {
             frames.extend(s.post_frames());
         }
+        charge_fresh_nonce_keys(&mut frames, envelope.fresh_nonce_keys());
         FrameTx {
             chain_id: envelope.chain_id,
             nonce_keys: envelope.nonce_keys.clone(),
@@ -114,6 +153,20 @@ impl<'a> TxPlan<'a> {
         }
         Err(BuildError::Unsettled(ROUNDS))
     }
+}
+
+/// The nonce is incremented where payment is approved, so a fresh key's slot is charged there:
+/// to the account's `VERIFY` when it pays for itself (`exp-frames` experiments 01 and 08), to the
+/// sponsor's `VERIFY(PAYMENT)` when someone else pays (experiment 16).
+fn charge_fresh_nonce_keys(frames: &mut [Frame], fresh: usize) {
+    let Some(payer) = frames
+        .iter_mut()
+        .find(|f| f.mode == mode::VERIFY && f.flags & approve::PAYMENT != 0)
+    else {
+        return;
+    };
+    let fresh = u64::try_from(fresh).expect("at most MAX_NONCE_KEYS keys");
+    payer.limits.state += fresh * STORAGE_SET_STATE_GAS;
 }
 
 #[cfg(feature = "rpc")]

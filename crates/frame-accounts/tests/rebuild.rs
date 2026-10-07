@@ -1,5 +1,5 @@
-//! Transactions `exp-frames` experiments 01 to 05 mined on the ethrex Hegota testnet, laid out
-//! again with this crate from what they were built from, and compared byte for byte.
+//! Transactions `exp-frames` experiments 01 to 05 and 10 mined on the ethrex Hegota testnet,
+//! laid out again with this crate from what they were built from, and compared byte for byte.
 //!
 //! Keys are not in the repository, so each rebuilt transaction takes its signature bytes from the
 //! mined one; everything else (frames, limits, flags, signature entries, sender) is this crate's.
@@ -340,4 +340,105 @@ fn the_examples_contracts_are_the_ones_the_experiments_call() {
     assert_eq!(address("ToyDex"), target(&swap_c.frames[2]));
     assert_eq!(address("Token B"), target(&swap_c.frames[3]));
     assert_eq!(address("tUSD"), TUSD);
+}
+
+// ---- 10: the expiry verifier frame ----
+
+#[test]
+fn ex10_a_deadline_is_the_first_frame() {
+    const USER: Address = address!("0xa6b01af7512a08b1f0a7603765b21a53a7d1d7db");
+    // A deadline in the future, the far deadline 2^64 - 1, and the funder sending to itself.
+    for (hash, sender) in [
+        ("0x96cdac11", USER),
+        ("0x045fb58b", USER),
+        ("0xefb6d408", FUNDER),
+    ] {
+        let m = mined(hash);
+        let deadline = u64::from_be_bytes(m.frames[0].data[..].try_into().unwrap());
+        let w = &m.frames[2];
+        let built = TxPlan::new(&Eoa::new(Signer::secp256k1(sender)))
+            .expires_at(deadline)
+            .call(calls::eth_transfer(target(w), w.value, true))
+            .build(&envelope(&m))
+            .unwrap();
+        assert_rebuilds(built, &m);
+    }
+}
+
+#[test]
+fn a_deadline_goes_before_the_deploy_frame() {
+    let account = SimpleAccount::new(FUNDER, salt_of("exp-frames/simple-account/v1"));
+    let env = Envelope {
+        chain_id: 8141,
+        nonce_keys: vec![U256::ZERO],
+        nonce_seq: 0,
+        fees: kohaku_frame_kit::Fees::default(),
+    };
+    let tx = TxPlan::new(&account).expires_at(1).build(&env).unwrap();
+    assert_eq!(tx.frames[0], Frame::expiry(1));
+    assert_eq!(tx.frames[1], account.deploy_frames()[0]);
+    assert_eq!(tx.frames[2].flags, approve::EXECUTION_AND_PAYMENT);
+}
+
+// ---- EIP-8250 nonce keys used for the first time ----
+
+/// Experiment 01 named the signer in these entries, and in `0x6f07b8e7` the `VERIFY` target as
+/// well, where `Eoa` leaves both implicit; so the frames' limits are compared, not the envelope.
+#[test]
+fn ex01_a_fresh_nonce_key_charges_its_slot_to_the_verify_that_pays() {
+    for (hash, verify_execution, fresh) in [
+        ("0x80ca7402", 5_000, 1),
+        ("0x26ed3e31", 5_000, 2),
+        ("0x6f07b8e7", 80_000, 1),
+    ] {
+        let m = mined(hash);
+        let env = envelope(&m);
+        assert_eq!(env.fresh_nonce_keys(), fresh, "{hash}");
+        let account = Eoa::new(Signer::secp256k1(m.sender)).with_verify_execution(verify_execution);
+        let built = TxPlan::new(&account)
+            .calls(m.frames[1..].iter().cloned())
+            .build(&env)
+            .unwrap();
+        assert_eq!(built.frames[0].limits, m.frames[0].limits, "{hash}");
+        assert_eq!(built.frames[1..], m.frames[1..], "{hash}");
+        assert_eq!(
+            built.frames[0].limits.state,
+            fresh as u64 * STORAGE_SET_STATE_GAS
+        );
+    }
+}
+
+#[test]
+fn a_fresh_nonce_key_is_charged_to_the_sponsor_when_one_pays() {
+    // Experiment 16: the first pull on a merchant's lane put 97,920 on the merchant's pay frame.
+    let user = Eoa::new(Signer::secp256k1(address!(
+        "0x00000000000000000000000000000000000000a1"
+    )));
+    let mut sponsor = EoaSponsor::new(Signer::secp256k1(FUNDER));
+    let mut env = Envelope {
+        chain_id: 8141,
+        nonce_keys: vec![U256::from(1)],
+        nonce_seq: 0,
+        fees: kohaku_frame_kit::Fees::default(),
+    };
+    let tx = TxPlan::new(&user)
+        .sponsored_by(&mut sponsor)
+        .build(&env)
+        .unwrap();
+    assert_eq!(tx.frames[0].limits.state, 0);
+    assert_eq!(tx.frames[1].limits.state, STORAGE_SET_STATE_GAS);
+
+    // The second use of the same key creates nothing.
+    env.nonce_seq = 1;
+    assert_eq!(env.fresh_nonce_keys(), 0);
+    let tx = TxPlan::new(&user)
+        .sponsored_by(&mut sponsor)
+        .build(&env)
+        .unwrap();
+    assert_eq!(tx.frames[1].limits.state, 0);
+
+    // Key 0 is the account nonce, which has no slot of its own.
+    env.nonce_keys = vec![U256::ZERO];
+    env.nonce_seq = 0;
+    assert_eq!(env.fresh_nonce_keys(), 0);
 }
