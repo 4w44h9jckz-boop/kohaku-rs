@@ -1,4 +1,5 @@
-//! The withdrawals `exp-frames` experiment 06 mined on the Hegota testnet, rebuilt byte for byte.
+//! The withdrawals mined on the Hegota testnet, rebuilt byte for byte: six built in TypeScript
+//! by `exp-frames` experiment 06, and one sent by `examples/keyed_withdrawal.rs`.
 
 use std::{fs, path::Path};
 
