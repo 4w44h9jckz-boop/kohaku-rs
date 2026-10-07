@@ -1,4 +1,4 @@
-//! Transactions `exp-frames` experiments 01 to 05 and 10 mined on the ethrex Hegota testnet,
+//! Transactions `exp-frames` experiments 01 to 05, 09 and 10 mined on the ethrex Hegota testnet,
 //! laid out again with this crate from what they were built from, and compared byte for byte.
 //!
 //! Keys are not in the repository, so each rebuilt transaction takes its signature bytes from the
@@ -8,9 +8,13 @@ use std::{fs, path::Path};
 
 use alloy::primitives::{Address, U256, address};
 use kohaku_frame_accounts::{
-    Envelope, Eoa, EoaSponsor, FrameAccount, Multisig, Signer, SimpleAccount, TokenSponsor, TxPlan,
+    CanonicalPaymaster, Envelope, Eoa, EoaSponsor, FrameAccount, Multisig, MultisigSponsor, Signer,
+    SimpleAccount, TokenSponsor, TxPlan,
+    builder::BuildError,
     calls,
-    contracts::{deploy_frame, multisig_code, salt_of},
+    contracts::{
+        canonical_paymaster_code, deploy_frame, is_canonical_paymaster, multisig_code, salt_of,
+    },
 };
 use kohaku_frame_kit::{
     Frame, FrameTx,
@@ -441,4 +445,102 @@ fn a_fresh_nonce_key_is_charged_to_the_sponsor_when_one_pays() {
     env.nonce_keys = vec![U256::ZERO];
     env.nonce_seq = 0;
     assert_eq!(env.fresh_nonce_keys(), 0);
+}
+
+// ---- 09: paymasters in the public mempool ----
+
+/// The sponsor key of experiment 09, and its instance of the canonical paymaster.
+const PM_SIGNER: Address = address!("0x712faf4318973e6df080cae63db221c348c65f16");
+const PM_MAIN: Address = address!("0xba19bf88b475d9d5d19bc0c26a35f4d3bf35b994");
+
+#[test]
+fn ex09_canonical_paymaster_address_and_code_hash() {
+    assert_eq!(
+        CanonicalPaymaster::address_of(PM_SIGNER, salt_of("exp-frames/09/main/v1")),
+        PM_MAIN
+    );
+    // The initcode ends with the runtime it returns, and that runtime is the pinned one.
+    let code = canonical_paymaster_code();
+    let runtime = &code[code.len() - 355..];
+    assert!(is_canonical_paymaster(runtime));
+    // Experiment 09's control: the same runtime and one unreachable byte more.
+    let mut copy = runtime.to_vec();
+    copy.push(0);
+    assert!(!is_canonical_paymaster(&copy));
+}
+
+#[test]
+fn ex09_the_canonical_paymaster_pays_for_users_with_no_eth() {
+    // Two users' first transactions, whose pay frame creates the sender's account; a later one
+    // at a low fee; and one through a second instance.
+    for (hash, state) in [
+        ("0xf2c01318", NEW_ACCOUNT_STATE_GAS),
+        ("0x2a0afccf", NEW_ACCOUNT_STATE_GAS),
+        ("0xda25878b", 0),
+        ("0xa9320bf8", 0),
+    ] {
+        let m = mined(hash);
+        let user = Eoa::new(Signer::secp256k1(m.sender));
+        let mut pm = CanonicalPaymaster::new(target(&m.frames[1]), Signer::secp256k1(PM_SIGNER))
+            .with_state(state);
+        let w = m.frames.last().unwrap();
+        let built = TxPlan::new(&user)
+            .sponsored_by(&mut pm)
+            .call(calls::eth_transfer(target(w), w.value, true))
+            .build(&envelope(&m))
+            .unwrap();
+        assert_rebuilds(built, &m);
+    }
+}
+
+#[test]
+fn ex09_a_multisig_treasury_pays_for_a_member() {
+    let m = mined("0xf32a1681");
+    let [alice, bob, carol] = [
+        address!("0x2fd47e3a9509808cd7758786df7d9ab20a5d68ed"),
+        address!("0xb944ed3494cfeb8aab873b1441557828c2cda86f"),
+        address!("0x50fbe19c83d38f351a2e651a7537270a70579d74"),
+    ];
+    let treasury = Multisig::new(
+        vec![alice, bob, carol],
+        2,
+        salt_of("exp-frames/09/treasury-2of3/v1"),
+    )
+    .unwrap()
+    .deployed(true)
+    .signed_by(vec![Signer::secp256k1(alice), Signer::secp256k1(carol)])
+    .unwrap();
+    assert_eq!(treasury.address(), target(&m.frames[1]));
+    let mut sponsor = MultisigSponsor::new(treasury).with_state(NEW_ACCOUNT_STATE_GAS);
+    let user = Eoa::new(Signer::secp256k1(m.sender));
+    let w = m.frames.last().unwrap();
+    let built = TxPlan::new(&user)
+        .sponsored_by(&mut sponsor)
+        .call(calls::eth_transfer(target(w), w.value, true))
+        .build(&envelope(&m))
+        .unwrap();
+    assert_rebuilds(built, &m);
+}
+
+#[test]
+fn the_canonical_paymaster_cannot_pay_for_a_multisig() {
+    // Its runtime reads entry 1, which a 2-of-3 sender's second owner would occupy.
+    let owners = vec![FUNDER, PM_SIGNER, PM_MAIN];
+    let sender = Multisig::new(owners.clone(), 2, salt_of("test"))
+        .unwrap()
+        .deployed(true)
+        .signed_by(owners[..2].iter().map(|o| Signer::secp256k1(*o)).collect())
+        .unwrap();
+    let mut pm = CanonicalPaymaster::new(PM_MAIN, Signer::secp256k1(PM_SIGNER));
+    let env = Envelope {
+        chain_id: 8141,
+        nonce_keys: vec![U256::ZERO],
+        nonce_seq: 1,
+        fees: kohaku_frame_kit::Fees::default(),
+    };
+    let err = TxPlan::new(&sender)
+        .sponsored_by(&mut pm)
+        .build(&env)
+        .unwrap_err();
+    assert!(matches!(err, BuildError::EntryIndex { needs: 1, has: 2 }));
 }

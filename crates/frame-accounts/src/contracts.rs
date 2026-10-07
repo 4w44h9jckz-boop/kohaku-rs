@@ -5,7 +5,7 @@
 //! (EVM version osaka, optimizer on, 200 runs). The tests check that this code, with the
 //! experiments' arguments and salts, lands at the addresses the testnet has it at.
 
-use alloy::primitives::{Address, B256, keccak256};
+use alloy::primitives::{Address, B256, b256, keccak256};
 use kohaku_frame_kit::{
     Frame,
     constants::{CPSB, CREATE2_DEPLOYER, NEW_ACCOUNT_STATE_GAS},
@@ -33,6 +33,26 @@ pub fn multisig_code() -> Vec<u8> {
 #[must_use]
 pub fn token_sponsor_code() -> Vec<u8> {
     code(include_str!("../contracts/TokenSponsor.hex"))
+}
+
+/// `CanonicalPaymaster.yul`: an instance of the EIP-8141 canonical paymaster, ethereum/EIPs#12041
+/// as ethrex pins it. Initcode: code `||` signer, as a 32-byte word. The constructor writes the
+/// signer to slot 0 and returns the PR's 355-byte runtime verbatim.
+#[must_use]
+pub fn canonical_paymaster_code() -> Vec<u8> {
+    code(include_str!("../contracts/CanonicalPaymaster.hex"))
+}
+
+/// `keccak256` of the canonical paymaster's runtime. A node recognises an instance by this hash
+/// and nothing else: `exp-frames` experiment 09 deployed a copy one unreachable byte longer, and
+/// the mempool treated it as any other paymaster contract.
+pub const CANONICAL_PAYMASTER_CODE_HASH: B256 =
+    b256!("0xda42f0d11838c4c0c3129b8b8e93e9718127ad6b315e517e1088125707c4d45c");
+
+/// Whether `runtime`, an account's code as `eth_getCode` returns it, is the canonical paymaster.
+#[must_use]
+pub fn is_canonical_paymaster(runtime: &[u8]) -> bool {
+    keccak256(runtime) == CANONICAL_PAYMASTER_CODE_HASH
 }
 
 /// A deterministic salt from a label.

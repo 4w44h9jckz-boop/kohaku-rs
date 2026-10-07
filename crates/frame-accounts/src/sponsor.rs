@@ -16,8 +16,10 @@ use kohaku_frame_kit::{
 };
 
 use crate::{
-    account::Signer,
-    contracts::{create2_address, token_sponsor_code, word},
+    account::{FrameAccount, Multisig, Signer},
+    contracts::{
+        canonical_paymaster_code, create2_address, deploy_frame, token_sponsor_code, word,
+    },
 };
 
 sol! {
@@ -44,6 +46,12 @@ pub trait Sponsor {
     /// default.
     fn reprice(&mut self, _tx: &FrameTx) -> Result<bool, UnknownScheme> {
         Ok(false)
+    }
+
+    /// The index this sponsor's first signature entry must have, for a sponsor whose code reads
+    /// a fixed one. The builder refuses a layout that puts it elsewhere.
+    fn entry_index(&self) -> Option<usize> {
+        None
     }
 }
 
@@ -209,5 +217,131 @@ impl Sponsor for TokenSponsor {
         }
         self.fee = need;
         Ok(true)
+    }
+}
+
+/// An instance of the canonical paymaster (`exp-frames` experiment 09): it pays for any
+/// transaction whose signature entry 1 is its signer's signature over the signature hash. The
+/// signer only signs, and never needs ETH.
+///
+/// It is the payer that lets one sponsor serve many users at once. ethrex recognises it by its
+/// code hash and admits as many pending transactions as its balance covers, less what pending
+/// ones reserve. Every other payer is held to one pending transaction: a copy of the same code
+/// one byte longer, a multisig treasury, and a code-less sponsor alike. In experiment 09 four
+/// users with no ETH sent at once; the canonical instance had 4 of 4 admitted, the others 1.
+///
+/// Its runtime reads entry 1, so the sender's account must contribute exactly one entry. A
+/// multisig sender cannot use it, and [`TxPlan::build`](crate::TxPlan::build) says so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanonicalPaymaster {
+    pub address: Address,
+    pub signer: Signer,
+    pub verify_execution: u64,
+    /// 183,600 when `APPROVE(PAYMENT)` creates the sender's account; zero otherwise.
+    pub state: u64,
+}
+
+impl CanonicalPaymaster {
+    /// Experiment 09 measured the pay frame at 5,210 gas. The PR lets a node refuse one that
+    /// declares more than 15,000; ethrex accepted up to 50,000.
+    pub const VERIFY_EXECUTION: u64 = 15_000;
+    /// The signature entry the runtime reads.
+    pub const ENTRY: usize = 1;
+
+    #[must_use]
+    pub fn new(address: Address, signer: Signer) -> Self {
+        Self {
+            address,
+            signer,
+            verify_execution: Self::VERIFY_EXECUTION,
+            state: 0,
+        }
+    }
+
+    #[must_use]
+    pub fn with_state(mut self, state: u64) -> Self {
+        self.state = state;
+        self
+    }
+
+    /// The initcode of an instance whose payments `signer` approves.
+    #[must_use]
+    pub fn initcode(signer: Address) -> Vec<u8> {
+        let mut code = canonical_paymaster_code();
+        code.extend_from_slice(&word(signer));
+        code
+    }
+
+    /// Where that instance is deployed under `salt`.
+    #[must_use]
+    pub fn address_of(signer: Address, salt: B256) -> Address {
+        create2_address(&Self::initcode(signer), salt)
+    }
+
+    /// A `SENDER` frame deploying that instance; the constructor writes one fresh slot.
+    #[must_use]
+    pub fn deploy_frame(signer: Address, salt: B256) -> Frame {
+        deploy_frame(&Self::initcode(signer), salt, STORAGE_SET_STATE_GAS)
+    }
+}
+
+impl Sponsor for CanonicalPaymaster {
+    fn payment_frames(&self) -> Vec<Frame> {
+        vec![
+            Frame::verify(approve::PAYMENT, Some(self.address))
+                .with_execution(self.verify_execution)
+                .with_state(self.state),
+        ]
+    }
+
+    fn signature_entries(&self) -> Vec<FrameSignature> {
+        vec![FrameSignature {
+            scheme: self.signer.scheme,
+            signer: Some(self.signer.address),
+            ..FrameSignature::default()
+        }]
+    }
+
+    fn entry_index(&self) -> Option<usize> {
+        Some(Self::ENTRY)
+    }
+}
+
+/// A [`Multisig`] paying for someone else: experiment 09's treasury. Its `VERIFY(PAYMENT)`
+/// counts its owners among the entries exactly as it does for its own transactions, and ignores
+/// the sender's. It is not the canonical paymaster, so the mempool holds it to one pending
+/// transaction: a treasury pays for one member at a time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MultisigSponsor {
+    /// Deployed, and `signed_by` the owners approving this payment.
+    pub multisig: Multisig,
+    /// 183,600 when `APPROVE(PAYMENT)` creates the sender's account; zero otherwise.
+    pub state: u64,
+}
+
+impl MultisigSponsor {
+    #[must_use]
+    pub fn new(multisig: Multisig) -> Self {
+        Self { multisig, state: 0 }
+    }
+
+    #[must_use]
+    pub fn with_state(mut self, state: u64) -> Self {
+        self.state = state;
+        self
+    }
+}
+
+impl Sponsor for MultisigSponsor {
+    fn payment_frames(&self) -> Vec<Frame> {
+        vec![
+            Frame::verify(approve::PAYMENT, Some(self.multisig.address()))
+                .with_execution(self.multisig.verify_execution)
+                .with_state(self.state),
+        ]
+    }
+
+    fn signature_entries(&self) -> Vec<FrameSignature> {
+        self.multisig.signature_entries()
     }
 }

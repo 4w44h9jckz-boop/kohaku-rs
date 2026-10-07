@@ -52,6 +52,8 @@ pub enum BuildError {
     Gas(#[from] UnknownScheme),
     #[error("the sponsor's price did not settle after {0} rounds")]
     Unsettled(usize),
+    #[error("the sponsor reads its signature at entry {needs}, but the account has {has} entries")]
+    EntryIndex { needs: usize, has: usize },
 }
 
 /// A transaction from `account`, optionally sponsored, making `calls`.
@@ -141,6 +143,12 @@ impl<'a> TxPlan<'a> {
     /// is unsigned: fill it with [`kohaku_frame_kit::sign_all`].
     pub fn build(mut self, envelope: &Envelope) -> Result<FrameTx, BuildError> {
         const ROUNDS: usize = 8;
+        if let Some(needs) = self.sponsor.as_deref().and_then(Sponsor::entry_index) {
+            let has = self.account.signature_entries().len();
+            if has != needs {
+                return Err(BuildError::EntryIndex { needs, has });
+            }
+        }
         for _ in 0..ROUNDS {
             let tx = self.layout(envelope);
             let changed = match self.sponsor.as_deref_mut() {

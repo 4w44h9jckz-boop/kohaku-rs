@@ -15,16 +15,24 @@ another `VERIFY` frame, and a call is a `SENDER` frame.
   - `EoaSponsor`: another account signs and pays.
   - `TokenSponsor`: paid in an ERC-20, priced on the transaction's `max_cost`, with a refund
     post-op (the EIP's Example 3).
+  - `CanonicalPaymaster`: an instance of the EIP's canonical paymaster, whose signer approves
+    payments without holding ETH. It is the only payer the mempool lets carry many pending
+    transactions at once; it reads signature entry 1, so the sender must have exactly one entry.
+  - `MultisigSponsor`: a `Multisig` treasury paying for one member at a time.
 - `builder`: `TxPlan` lays out account, sponsor and calls, and lets the sponsor price the
-  result. Signing is separate (`kohaku_frame_kit::sign_all`), so keys never have to be where the
+  result. `expires_at` adds a deadline in the expiry verifier frame, which goes first. A nonce
+  key used for the first time gets its 97,920 state gas on whichever frame approves payment.
+  Signing is separate (`kohaku_frame_kit::sign_all`), so keys never have to be where the
   transaction is built.
 - `calls` and `contracts`: common calls with the state gas they need, and the account and
   sponsor contracts with CREATE2 deployment. The Yul sources are in `contracts/`.
 
-These are the contracts and layouts of the `exp-frames` experiments 01 to 05. The tests rebuild
-19 transactions those experiments mined on the ethrex Hegota testnet byte for byte, and check
-that the embedded contract code lands at the addresses the testnet has it at. The examples run
-each experiment again from Rust:
+These are the contracts and layouts of the `exp-frames` experiments 01 to 05, 09 and 10. The
+tests rebuild 27 transactions those experiments mined on the ethrex Hegota testnet byte for
+byte, and 3 more frame for frame, where the experiment named a signer this crate leaves
+implicit. They also check that the embedded contract code lands at the addresses the testnet
+has it at, and that the canonical paymaster's runtime hashes to the pinned value. The examples
+run experiments 01 to 05 again from Rust:
 
 ```text
 PRIVATE_KEY=0x... cargo run --release -p kohaku-frame-accounts --example <name>
@@ -44,3 +52,20 @@ transactions, now fixtures in `kohaku-frame-kit`. Every frame used the gas the T
 recorded for the same step. The multisig transfers match exactly (35,622 and 43,554 gas). The
 other totals differ only where the calldata or the existing state differs: other recipients, or
 a slot the earlier run had already created.
+
+## What later experiments changed here
+
+| Rule | Where | From |
+|---|---|---|
+| A deadline is a `VERIFY` frame on `0x8141` with 8 bytes of data, first in the transaction. It costs 3,051 gas, and 3,050 runs out | `TxPlan::expires_at` | experiment 10 |
+| A nonce key's first use creates a 64-byte slot, charged to the frame that approves payment | `Envelope::fresh_nonce_keys`, the builder | experiments 01, 08 and 16 |
+| The canonical paymaster is recognised by its code hash alone. Every other payer, a code-less sponsor included, is held to one pending transaction | `CanonicalPaymaster`, `contracts::is_canonical_paymaster` | experiment 09 |
+| A replacement must raise both fees by 10% | `kohaku_frame_kit::Fees::bumped` | experiment 19 |
+| A receipt can name a block that is then replaced; send what depends on it only once a block is built on it | `kohaku_frame_kit::rpc::execute` | experiment 19 |
+
+Experiment 21 ran `kohaku-userop-kit`'s path on the same chain: EntryPoint v0.8, a
+`Simple7702Account` EOA and a bundler, against frames. The same ERC-20 transfer cost 122,868
+gas through the EntryPoint, 116,735 from a `SimpleAccount`, and 47,927 from a frame EOA. The
+first operation from a fresh 7702 EOA cost another 195,840, for the EntryPoint's nonce and
+deposit slots. The EntryPoint writes the deposit slot after it has measured the operation's gas,
+so the bundler paid that slot's 97,920 itself. A frame sender has neither slot and no bundler.
