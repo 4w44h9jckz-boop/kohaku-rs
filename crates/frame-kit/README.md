@@ -10,6 +10,9 @@ transaction here.
   `Fees::bumped` for a replacement, which ethrex accepts only when both fees rise by 10%.
 - `gas`: intrinsic gas, the calldata floor, `max_cost` and settlement from frame receipts.
 - `sign`: secp256k1 and P256 signing, with the ordering several signers need.
+- `digest`: the execution-scope digest of `exp-frames` experiment 27's draft ERC, an EIP-712
+  hash of every frame except the payer's, which an execution-only signature entry carries as its
+  `msg` so that a payer can be chosen, or replaced, after the sender signs.
 - `json` and `rpc` (feature `rpc`, on by default): the node's JSON shapes, simulation through
   `ethrex_simulateFrameTransaction`, submission and receipts. `execute` returns only once a block
   has been built on the receipt's block (`wait_for_confirmed_receipt`): ethrex can serve a receipt
@@ -21,4 +24,5 @@ experiments and by the `kohaku-frame-pool` and `kohaku-frame-accounts` examples
 over the signature hash computed here; settle each one to its receipt's `gasUsed`; and match the
 golden vector in ethrex's `scripts/hegota-testnet/frametx.py`. `tests/mempool.rs` checks the
 replacement rule and the receipt rule, both from `exp-frames` experiment 19, against a mocked
-node.
+node. `tests/execution_digest.rs` computes experiment 27's ten vectors through alloy's EIP-712
+encoder and matches the digests viem produced for them.
