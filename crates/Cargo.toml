@@ -4,6 +4,7 @@ members = [
     "frame-accounts",
     "frame-kit",
     "frame-pool",
+    "frame-registry",
     "frame-wallet",
     "merkle-tree",
     "tornadocash",
@@ -24,6 +25,7 @@ alloy = "2.4.1"
 alloy-sol-types = "1.7"
 anyhow = "1.0.104"
 ark-bn254 = "0.6.0"
+ark-ec = "0.6.0"
 ark-ff = "0.6.0"
 async-trait = "0.1.92"
 blake-hash = "0.2.0"
@@ -38,6 +40,7 @@ kohaku-fork-kit = { path = "fork-kit" }
 kohaku-frame-accounts = { path = "frame-accounts" }
 kohaku-frame-kit = { path = "frame-kit" }
 kohaku-frame-pool = { path = "frame-pool" }
+kohaku-frame-registry = { path = "frame-registry" }
 kohaku-frame-wallet = { path = "frame-wallet" }
 kohaku-merkle-tree = { path = "merkle-tree" }
 kohaku-tornadocash = { path = "tornadocash" }

@@ -3788,6 +3788,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "kohaku-frame-registry"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff 0.6.0",
+ "hex",
+ "kohaku-frame-accounts",
+ "kohaku-frame-kit",
+ "kohaku-frame-pool",
+ "kohaku-merkle-tree",
+ "kohaku-tornadocash",
+ "ruint",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "kohaku-frame-wallet"
 version = "0.1.0"
 dependencies = [
