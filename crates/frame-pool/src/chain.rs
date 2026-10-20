@@ -229,6 +229,40 @@ pub async fn priced_withdrawal<P: Provider>(
     Ok((tx, proof))
 }
 
+/// A batch of pool-paid withdrawals from one wallet, from a keyed pool, all against the same
+/// root: one per `(note, recipient)`, each priced as [`priced_withdrawal`] prices one. Each has
+/// its own nullifier hash as its only nonce key, so no two share a key, and none reads the
+/// pool's storage in `VERIFY`. A node that admits disjoint keys from one sender (emem's
+/// `disjoint-keys`) can hold them all at once, and the wallet sends them without waiting for
+/// one to be mined before the next.
+///
+/// Refuses a storage pool, whose withdrawals share the pool's account nonce, and two spends of
+/// one note, which share a key: the second could only replace the first.
+pub async fn keyed_batch<P: Provider>(
+    provider: &P,
+    pool: &FramePool,
+    spends: &[(Note, Address)],
+    leaves: &[Field],
+    opts: &WithdrawalOpts,
+    rng: &mut impl CryptoRng,
+) -> Result<Vec<(FrameTx, FramePoolProof)>, ChainError> {
+    if !pool.mode.is_keyed() {
+        return Err(ChainError::Missing("a batch needs a keyed pool"));
+    }
+    let mut out: Vec<(FrameTx, FramePoolProof)> = Vec::with_capacity(spends.len());
+    for (note, recipient) in spends {
+        let (tx, proof) =
+            priced_withdrawal(provider, pool, note, leaves, *recipient, opts, rng).await?;
+        if out.iter().any(|(t, _)| t.nonce_keys == tx.nonce_keys) {
+            return Err(ChainError::Missing(
+                "two spends of one note share a nonce key: the second could only replace the first",
+            ));
+        }
+        out.push((tx, proof));
+    }
+    Ok(out)
+}
+
 /// The fees `exp-frames` experiment 30 priced both withdrawals at: a 0.1 gwei tip and a 0.2 gwei
 /// max fee, room for the base fee to double from a wallet's point of view.
 pub const WALLET_FEES: Fees = Fees {

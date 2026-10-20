@@ -1,8 +1,10 @@
 //! The withdrawals mined on the Hegota testnet, rebuilt byte for byte: six built in TypeScript
 //! by `exp-frames` experiment 06, one sent by `examples/keyed_withdrawal.rs`, two built in
 //! TypeScript by `exp-frames` experiment 30 (one from its `RefundPool`), one `RefundPool`
-//! withdrawal sent by `examples/refund_withdrawal.rs`, and the note `kohaku-frame-wallet`'s
-//! `device_recovery` example recovered from two devices and withdrew.
+//! withdrawal sent by `examples/refund_withdrawal.rs`, the note `kohaku-frame-wallet`'s
+//! `device_recovery` example recovered from two devices and withdrew, and the pair
+//! `examples/concurrent_withdrawals.rs` sent at once through a skandha node (`exp-frames`
+//! experiment 34).
 
 use std::{fs, path::Path};
 
@@ -170,9 +172,9 @@ fn rebuilds_every_mined_withdrawal() {
     ] {
         assert!(layouts.contains(&layout), "{layout:?}");
     }
-    // Experiment 06, `keyed_withdrawal` and `device_recovery` used the defaults; experiment 30 and
-    // `refund_withdrawal` tightened every limit from a simulation.
-    assert_eq!(limits, [3, 8]);
+    // Experiment 06, `keyed_withdrawal` and `device_recovery` used the defaults; experiment 30,
+    // `refund_withdrawal` and `concurrent_withdrawals` tightened every limit from a simulation.
+    assert_eq!(limits, [5, 8]);
 }
 
 #[test]
@@ -339,4 +341,39 @@ fn refuses_what_the_pool_would_refuse() {
         ),
         WithdrawalTxError::Fee { .. }
     ));
+}
+
+/// `exp-frames` experiment 34's pair, built by `chain::keyed_batch` and mined in one block
+/// through a skandha node: two nonce keys, and nothing else between them but the nullifier,
+/// the proof and the recipient.
+#[test]
+fn the_concurrent_pair_differs_only_in_its_notes() {
+    let pair: Vec<FrameTx> = mined()
+        .into_iter()
+        .filter(|t| {
+            [
+                b256!("0x5ce6a700497946b229178ad77233febfb473584531f58c3ddab93664405d2e52"),
+                b256!("0xe2e65ff9e541e298fbd17fde4eb7b977f3906248eee076f32accbaf8b34bde74"),
+            ]
+            .contains(&t.hash())
+        })
+        .collect();
+    assert_eq!(pair.len(), 2);
+    let (a, b) = (&pair[0], &pair[1]);
+    assert_eq!((a.sender, b.sender), (KEYED_POOL, KEYED_POOL));
+    assert_ne!(a.nonce_keys, b.nonce_keys);
+    assert_eq!((a.nonce_seq, b.nonce_seq), (0, 0));
+    assert_eq!(a.fees, b.fees);
+    // The recent-root tuple and every limit are the same; only the withdrawal frame differs.
+    for i in 0..2 {
+        assert_eq!(a.frames[i], b.frames[i]);
+    }
+    assert_eq!(a.frames[2].limits, b.frames[2].limits);
+    let (ca, cb) = (
+        withdrawCall::abi_decode(&a.frames[2].data).unwrap(),
+        withdrawCall::abi_decode(&b.frames[2].data).unwrap(),
+    );
+    assert_eq!((ca.root, ca.fee, ca.relayer), (cb.root, cb.fee, cb.relayer));
+    assert_ne!(ca.nullifierHash, cb.nullifierHash);
+    assert_ne!(ca.recipient, cb.recipient);
 }
