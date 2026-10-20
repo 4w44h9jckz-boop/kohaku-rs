@@ -1,7 +1,8 @@
 //! The withdrawals mined on the Hegota testnet, rebuilt byte for byte: six built in TypeScript
 //! by `exp-frames` experiment 06, one sent by `examples/keyed_withdrawal.rs`, two built in
-//! TypeScript by `exp-frames` experiment 30 (one from its `RefundPool`), and one `RefundPool`
-//! withdrawal sent by `examples/refund_withdrawal.rs`.
+//! TypeScript by `exp-frames` experiment 30 (one from its `RefundPool`), one `RefundPool`
+//! withdrawal sent by `examples/refund_withdrawal.rs`, and the note `kohaku-frame-wallet`'s
+//! `device_recovery` example recovered from two devices and withdrew.
 
 use std::{fs, path::Path};
 
@@ -169,9 +170,9 @@ fn rebuilds_every_mined_withdrawal() {
     ] {
         assert!(layouts.contains(&layout), "{layout:?}");
     }
-    // Experiment 06 and `keyed_withdrawal` used the defaults; experiment 30 and
+    // Experiment 06, `keyed_withdrawal` and `device_recovery` used the defaults; experiment 30 and
     // `refund_withdrawal` tightened every limit from a simulation.
-    assert_eq!(limits, [3, 7]);
+    assert_eq!(limits, [3, 8]);
 }
 
 #[test]

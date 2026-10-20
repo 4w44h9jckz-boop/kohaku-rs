@@ -9,6 +9,9 @@ anyhow = { workspace = true }
 hex = { workspace = true }
 kohaku-frame-accounts = { workspace = true }
 kohaku-frame-kit = { workspace = true }
+kohaku-frame-pool = { workspace = true }
+kohaku-tornadocash = { workspace = true }
+kohaku-tornadocash-keychain = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

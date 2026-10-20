@@ -117,6 +117,28 @@ before the method answers.
   an earlier draft. The ERC as read names `wallet_requestExecutionPermissions`. It also writes
   `ruleTypes` in its schema and `rulesTypes` in its example. This crate answers `ruleTypes`.
 
+## Recovering note openings from the owner's devices
+
+`src/recovery.rs`: the keychain key that `kohaku-tornadocash-keychain` derives every note from is
+split between two of the owner's devices. Each holds a uniformly random 32-byte share, and the
+key is their XOR. These are the same two devices that can recover a `DeviceRecoveryAccount`.
+After the loss the shares give the key back, and the keychain's own `recover` finds its notes
+among a frame pool's public `Deposit` and `Withdrawal` events, which `pool_events` reads.
+`root_slot` finds the EIP-8272 slot a recovered note's root was published in, so the note can be
+spent.
+
+```text
+PRIVATE_KEY=0x... cargo run --release -p kohaku-frame-wallet --example device_recovery
+```
+
+A run on 2026-10-20 deposited a keychain note into `exp-frames` experiment 06's keyed pool, in
+block 479022, and then dropped the key. The two shares gave it back, and the keychain found its
+note among the pool's 24 events. The recovered note was withdrawn in block 479025, with no
+signature and the pool as payer.
+
+**What it leaves out.** Two shares of two: losing both devices loses the notes, as it loses the
+account. Shamir's scheme, two of three, is the step up, and is not here.
+
 ## Tests and runs
 
 `tests/experiment_28.rs` rebuilds the twelve batches `exp-frames` experiment 28 has as fixtures:

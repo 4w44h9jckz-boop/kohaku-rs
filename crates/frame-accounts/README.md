@@ -19,6 +19,13 @@ another `VERIFY` frame, and a call is a `SENDER` frame.
   - `SessionAccount`: one owner, plus session keys the owner grants. A session may call one
     target with one selector until a deadline, within a budget in wei that counts value and
     maximum fees; `session_tx` lays out the four-frame shape the account's `VERIFY` checks.
+- `recovery`: `DeviceRecoveryAccount`, an owner key that m of the owner's own n devices can
+  replace after a delay the owner can cancel (`exp-frames` experiment 31). Its `TimeRule` says
+  when a finish is too early. `Eip` checks in execution, so an early finish is included and
+  reverts. `Ethrex` checks in `VERIFY` through the expiry verifier, so an early finish is refused
+  at admission, but on ethrex only: a client that follows the EIP's wording never admits a
+  finish. `tests/device_recovery.rs` rebuilds the experiment's 13 account transactions byte for
+  byte.
 - `sponsor`: who pays when the sender does not.
   - `EoaSponsor`: another account signs and pays.
   - `TokenSponsor`: paid in an ERC-20, priced on the transaction's `max_cost`, with a refund
