@@ -37,8 +37,8 @@ use commonware_codec::Encode;
 use commonware_cryptography::bls12381::primitives::group::{G1, Scalar};
 use commonware_math::algebra::{CryptoGroup, Random};
 use kohaku_checked_read::{
-    Checked, CheckedLookup, CheckedReader, CheckedTable, Entry, Evidence, Header, Server,
-    Verdict, judge,
+    Checked, CheckedLookup, CheckedReader, CheckedTable, Entry, Evidence, Header, Server, Verdict,
+    judge,
     trie::{self, AccountState, Nodes},
 };
 use kohaku_frame_accounts::{
@@ -166,7 +166,16 @@ async fn main() -> anyhow::Result<()> {
 
     // Issuance against what the funder bought: 4, 1, 1 and 1 tickets, and one for another server.
     let ids: Vec<B256> = servers.iter().map(|(_, s, _)| s.manifest.server).collect();
-    let plan = [ids[0], ids[0], ids[0], ids[0], ids[1], ids[2], ids[3], B256::ZERO];
+    let plan = [
+        ids[0],
+        ids[0],
+        ids[0],
+        ids[0],
+        ids[1],
+        ids[2],
+        ids[3],
+        B256::ZERO,
+    ];
     let (tickets, transcript) = issue(&mut committee, funder.address(), &plan)?;
 
     // 4. The reader: its own header, then the reads.
@@ -204,15 +213,21 @@ async fn main() -> anyhow::Result<()> {
         let node: Value = provider
             .raw_request(method.into(), (TARGET, BlockId::number(snapshot)))
             .await?;
-        println!("{method}({TARGET}): {value} by {path:?}, checked; the node at {snapshot}: {node}");
+        println!(
+            "{method}({TARGET}): {value} by {path:?}, checked; the node at {snapshot}: {node}"
+        );
         ensure!(value == node, "the checked read disagrees with the node");
-        reads.push(json!({ "server": servers[0].0, "method": method, "address": TARGET,
-                           "value": value, "path": format!("{path:?}"), "node": node }));
+        reads.push(
+            json!({ "server": servers[0].0, "method": method, "address": TARGET,
+                           "value": value, "path": format!("{path:?}"), "node": node }),
+        );
     }
     let absent = Address::from(rng.random::<[u8; 20]>());
     let unanswered = readers[0].read(absent).await.err().context("an answer")?;
     println!("{absent}, not in the table: {unanswered}");
-    reads.push(json!({ "server": servers[0].0, "address": absent, "outcome": unanswered.to_string() }));
+    reads.push(
+        json!({ "server": servers[0].0, "address": absent, "outcome": unanswered.to_string() }),
+    );
 
     let mut checks = vec![];
     for (k, reader) in readers.iter().enumerate().skip(1) {
@@ -224,10 +239,15 @@ async fn main() -> anyhow::Result<()> {
             Checked::Refused { why, .. } => ("refused", why.clone()),
         };
         println!("{}: {outcome}: {why}", servers[k].0);
-        checks.push(json!({ "server": servers[k].0, "address": TARGET, "outcome": outcome,
-                            "detail": why, "readMicros": micros }));
+        checks.push(
+            json!({ "server": servers[k].0, "address": TARGET, "outcome": outcome,
+                            "detail": why, "readMicros": micros }),
+        );
     }
-    ensure!(checks[0]["outcome"] == "proven", "the honest whole-branch read was refused");
+    ensure!(
+        checks[0]["outcome"] == "proven",
+        "the honest whole-branch read was refused"
+    );
     ensure!(
         checks[1]["outcome"] == "refused" && checks[2]["outcome"] == "refused",
         "a lie passed the reader's check"
@@ -248,7 +268,12 @@ async fn main() -> anyhow::Result<()> {
         ("a ticket for another server", &tickets[7]),
         ("a signature that is no ticket", &junk),
     ] {
-        let err = readers[0].send(&q, t).await.err().context("answered")?.to_string();
+        let err = readers[0]
+            .send(&q, t)
+            .await
+            .err()
+            .context("answered")?
+            .to_string();
         println!("{what}: {err}");
         refusals.push(json!({ "what": what, "answer": err }));
     }
@@ -264,14 +289,34 @@ async fn main() -> anyhow::Result<()> {
 
     // 6. The cost.
     let logs = [
-        reqwest::get(format!("{}/log", servers[0].2)).await?.json::<Value>().await?,
-        reqwest::get(format!("{}/log", servers[1].2)).await?.json::<Value>().await?,
-        reqwest::get(format!("{}/log", servers[2].2)).await?.json::<Value>().await?,
-        reqwest::get(format!("{}/log", servers[3].2)).await?.json::<Value>().await?,
+        reqwest::get(format!("{}/log", servers[0].2))
+            .await?
+            .json::<Value>()
+            .await?,
+        reqwest::get(format!("{}/log", servers[1].2))
+            .await?
+            .json::<Value>()
+            .await?,
+        reqwest::get(format!("{}/log", servers[2].2))
+            .await?
+            .json::<Value>()
+            .await?,
+        reqwest::get(format!("{}/log", servers[3].2))
+            .await?
+            .json::<Value>()
+            .await?,
     ];
     let accounts: BTreeMap<Address, Account> =
         entries.iter().map(|(a, e)| (*a, e.account)).collect();
-    let cost = cost(&committee, &tickets[0], &accounts, &entries, split, &salts, &servers[0].1)?;
+    let cost = cost(
+        &committee,
+        &tickets[0],
+        &accounts,
+        &entries,
+        split,
+        &salts,
+        &servers[0].1,
+    )?;
     println!("cost: {cost}");
 
     if let Ok(path) = env::var("EVIDENCE") {
@@ -313,7 +358,10 @@ async fn main() -> anyhow::Result<()> {
             "serverLogs": logs,
             "cost": cost,
         });
-        fs::write(&path, format!("{}\n", serde_json::to_string_pretty(&record)?))?;
+        fs::write(
+            &path,
+            format!("{}\n", serde_json::to_string_pretty(&record)?),
+        )?;
         println!("recorded in {path}");
     }
     Ok(())
@@ -340,7 +388,11 @@ async fn third_party(published: &str, url: &str) -> anyhow::Result<(String, Valu
     let verdict = judge(&evidence, &header, &chain)?;
     let micros = t.elapsed().as_micros();
     let said = match &verdict {
-        Verdict::Wrong { address, signed, chain } => format!(
+        Verdict::Wrong {
+            address,
+            signed,
+            chain,
+        } => format!(
             "wrong: the server signed balance {} for {address}, the chain holds {}",
             U256::from_be_slice(&signed[20..32]),
             chain.map_or_else(|| "no account".to_owned(), |c| c.balance.to_string())
@@ -442,7 +494,10 @@ async fn server_state_root<P: Provider>(provider: &P, n: u64) -> anyhow::Result<
     let block: Value = provider
         .raw_request("eth_getBlockByNumber".into(), (format!("{n:#x}"), false))
         .await?;
-    Ok(block["stateRoot"].as_str().context("a state root")?.parse()?)
+    Ok(block["stateRoot"]
+        .as_str()
+        .context("a state root")?
+        .parse()?)
 }
 
 /// Each of `seen` without code, or with an EIP-7702 delegation, with its branch at `snapshot`.
@@ -455,7 +510,10 @@ async fn branches<P: Provider>(
     let mut out = BTreeMap::new();
     for &a in seen {
         let p = provider.get_proof(a, vec![]).block_id(at).await?;
-        ensure!(!p.account_proof.is_empty(), "no branch for {a} at {snapshot}");
+        ensure!(
+            !p.account_proof.is_empty(),
+            "no branch for {a} at {snapshot}"
+        );
         let delegate = if p.code_hash == KECCAK256_EMPTY || p.code_hash.is_zero() {
             Address::ZERO
         } else {
@@ -528,8 +586,10 @@ fn cost(
     let bare = Table::build(accounts, CAPACITY, salts.iter().copied())?;
     let q: Vec<u32> = (0..bare.db.cols).map(|i| i as u32).collect();
     let bare_ns = time(&mut || drop(std::hint::black_box(bare.db.answer(&q))), 101);
-    answers.push(json!({ "layout": "no branch (experiment 37)", "tableBytes": bare.db.data.len(),
-                         "answerBytes": bare.db.rows * 4, "answerNanos": bare_ns }));
+    answers.push(
+        json!({ "layout": "no branch (experiment 37)", "tableBytes": bare.db.data.len(),
+                         "answerBytes": bare.db.rows * 4, "answerNanos": bare_ns }),
+    );
     let mut signed_answer = vec![];
     for (layout, s) in [("split", split), ("whole branch", 0)] {
         let t = CheckedTable::build(entries, CAPACITY, s, salts.iter().copied())?;
@@ -538,11 +598,16 @@ fn cost(
         if s == split {
             signed_answer = t.db.answer(&q);
         }
-        answers.push(json!({ "layout": layout, "split": s, "tableBytes": t.db.data.len(),
-                             "answerBytes": t.db.rows * 4, "answerNanos": ns }));
+        answers.push(
+            json!({ "layout": layout, "split": s, "tableBytes": t.db.data.len(),
+                             "answerBytes": t.db.rows * 4, "answerNanos": ns }),
+        );
     }
     let q: Vec<u32> = (0..server.manifest.cols).map(|i| i as u32).collect();
-    let sign = time(&mut || drop(std::hint::black_box(server.sign(&q, &signed_answer))), 101);
+    let sign = time(
+        &mut || drop(std::hint::black_box(server.sign(&q, &signed_answer))),
+        101,
+    );
     let e = &entries[&TARGET];
     let nodes: Nodes = e.proof.iter().collect();
     let root = server.manifest.state_root;

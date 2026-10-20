@@ -9,8 +9,7 @@ use alloy::{
     trie::{EMPTY_ROOT_HASH, HashBuilder, Nibbles, proof::ProofRetainer},
 };
 use kohaku_checked_read::{
-    Checked, CheckedLookup, CheckedReader, CheckedTable, Entry, Evidence, Header, Server,
-    Verdict,
+    Checked, CheckedLookup, CheckedReader, CheckedTable, Entry, Evidence, Header, Server, Verdict,
     evidence::Dismissed,
     judge, statement,
     table::CLAIM,
@@ -199,13 +198,19 @@ async fn a_checked_read_through_the_router_and_two_lies_refused_and_judged() {
     let mut committee = Committee::dkg(&mut rng, 4).unwrap();
     let (root, entries) = state(&mut rng, 120);
     let header = header(root);
-    let (target, true_entry) = entries.iter().nth(17).map(|(a, e)| (*a, e.clone())).unwrap();
+    let (target, true_entry) = entries
+        .iter()
+        .nth(17)
+        .map(|(a, e)| (*a, e.clone()))
+        .unwrap();
 
     // The honest server, the branch split at depth 1: a read through the router, proven.
     let honest = serve(&mut rng, &committee, &entries, 1, &header).await;
-    honest
-        .reader
-        .add_tickets([issue(&mut rng, &mut committee, honest.server.manifest.server)]);
+    honest.reader.add_tickets([issue(
+        &mut rng,
+        &mut committee,
+        honest.server.manifest.server,
+    )]);
     let router = PirRouter::with_rpc(
         Arc::new(CheckedLookup {
             reader: honest.reader.clone(),
@@ -224,9 +229,11 @@ async fn a_checked_read_through_the_router_and_two_lies_refused_and_judged() {
     assert!(honest.table.top_bytes() > 0);
 
     // An address the table does not hold: no record, so no answer, never an empty account.
-    honest
-        .reader
-        .add_tickets([issue(&mut rng, &mut committee, honest.server.manifest.server)]);
+    honest.reader.add_tickets([issue(
+        &mut rng,
+        &mut committee,
+        honest.server.manifest.server,
+    )]);
     let absent = Address::from(rng.random::<[u8; 20]>());
     let err = honest.reader.read(absent).await.unwrap_err().to_string();
     assert!(err.contains("unanswered"), "{err}");
@@ -239,8 +246,11 @@ async fn a_checked_read_through_the_router_and_two_lies_refused_and_judged() {
     {
         let e = forged.get_mut(&target).unwrap();
         let leaf = e.proof.pop().unwrap();
-        e.proof
-            .push(trie::reencode_leaf(&leaf, &state_of(&e.account)).unwrap().into());
+        e.proof.push(
+            trie::reencode_leaf(&leaf, &state_of(&e.account))
+                .unwrap()
+                .into(),
+        );
     }
     let chain: Nodes = true_entry.proof.iter().collect();
     for (lie, split, why) in [
@@ -277,7 +287,10 @@ async fn a_checked_read_through_the_router_and_two_lies_refused_and_judged() {
         assert_eq!(judge(&e, &header, &chain), Err(Dismissed::Claim));
         let mut e = (*evidence).clone();
         e.hint_rows[3] = words_to_hex(&vec![1u32; pir::N]);
-        assert!(matches!(judge(&e, &header, &chain), Err(Dismissed::HintRow(_))));
+        assert!(matches!(
+            judge(&e, &header, &chain),
+            Err(Dismissed::HintRow(_))
+        ));
         let mut e = (*evidence).clone();
         let mut answer = hex_to_words(&e.answer).unwrap();
         answer[0] ^= 1;
@@ -285,7 +298,10 @@ async fn a_checked_read_through_the_router_and_two_lies_refused_and_judged() {
         assert_eq!(judge(&e, &header, &chain), Err(Dismissed::Signature));
         let mut other = header.clone();
         other.number += 1;
-        assert!(matches!(judge(&evidence, &other, &chain), Err(Dismissed::Header(_))));
+        assert!(matches!(
+            judge(&evidence, &other, &chain),
+            Err(Dismissed::Header(_))
+        ));
     }
 }
 
@@ -367,5 +383,8 @@ async fn a_reader_cannot_frame_an_honest_server() {
     let ticket = issue(&mut rng, &mut committee, m.server);
     let (answer, sig) = run.reader.send(&noisy, &ticket).await.unwrap();
     let ev = evidence_for(&run, &noisy, secret.open(), col, slot, &answer, sig);
-    assert!(matches!(judge(&ev, &header, &chain), Err(Dismissed::Query(_))));
+    assert!(matches!(
+        judge(&ev, &header, &chain),
+        Err(Dismissed::Query(_))
+    ));
 }

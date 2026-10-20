@@ -80,7 +80,11 @@ impl CheckedTable {
             .iter()
             .map(|(a, e)| Ok((*a, record(*a, e, split)?)))
             .collect::<Result<Vec<_>, TableError>>()?;
-        let len = records.iter().map(|(_, r)| r.len()).max().unwrap_or(CLAIM + 2);
+        let len = records
+            .iter()
+            .map(|(_, r)| r.len())
+            .max()
+            .unwrap_or(CLAIM + 2);
         let top: BTreeSet<(B256, Bytes)> = entries
             .values()
             .flat_map(|e| e.proof.iter().take(split))

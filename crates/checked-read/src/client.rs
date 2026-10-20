@@ -203,7 +203,8 @@ impl CheckedReader {
         let answer = hex_to_words(&r.answer)
             .filter(|a| a.len() == self.manifest.rows)
             .ok_or(ReadError::Malformed)?;
-        let raw = hex::decode(r.signature.trim_start_matches("0x")).map_err(|_| ReadError::Unsigned)?;
+        let raw =
+            hex::decode(r.signature.trim_start_matches("0x")).map_err(|_| ReadError::Unsigned)?;
         let digest = statement::digest(statement::commitment(&self.manifest), query, &answer);
         let signer = Signature::try_from(raw.as_slice())
             .ok()
@@ -282,12 +283,13 @@ pub struct CheckedLookup {
 
 impl LookupBackend for CheckedLookup {
     fn lookup(&self, key: &[u8]) -> Result<Option<Vec<u8>>, PirProviderError> {
-        let address = Address::try_from(key).map_err(|e| PirProviderError::Client(e.to_string()))?;
+        let address =
+            Address::try_from(key).map_err(|e| PirProviderError::Client(e.to_string()))?;
         match self.runtime.block_on(self.reader.read(address)) {
             Ok(Checked::Proven { value, .. }) => Ok(Some(value.to_vec())),
-            Ok(Checked::Refused { why, .. }) => Err(PirProviderError::Client(
-                ReadError::Wrong(why).to_string(),
-            )),
+            Ok(Checked::Refused { why, .. }) => {
+                Err(PirProviderError::Client(ReadError::Wrong(why).to_string()))
+            }
             Err(e) => Err(PirProviderError::Client(e.to_string())),
         }
     }

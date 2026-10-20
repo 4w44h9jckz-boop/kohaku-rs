@@ -66,7 +66,10 @@ pub fn digest(commitment: B256, query: &[u32], answer: &[u32]) -> B256 {
 
 /// The tree's levels, leaves first.
 fn levels(hint: &[u32], width: usize) -> Vec<Vec<B256>> {
-    let mut level: Vec<B256> = hint.chunks_exact(width).map(|r| keccak256(words(r))).collect();
+    let mut level: Vec<B256> = hint
+        .chunks_exact(width)
+        .map(|r| keccak256(words(r)))
+        .collect();
     level.resize(level.len().next_power_of_two(), B256::ZERO);
     let mut out = vec![level];
     while out.last().is_some_and(|l| l.len() > 1) {
@@ -87,7 +90,11 @@ pub fn hint_root(hint: &[u32], width: usize) -> B256 {
 
 /// The siblings of each of `rows`, from the leaf up.
 #[must_use]
-pub fn hint_paths(hint: &[u32], width: usize, rows: impl IntoIterator<Item = usize>) -> Vec<Vec<B256>> {
+pub fn hint_paths(
+    hint: &[u32],
+    width: usize,
+    rows: impl IntoIterator<Item = usize>,
+) -> Vec<Vec<B256>> {
     let levels = levels(hint, width);
     rows.into_iter()
         .map(|mut i| {
