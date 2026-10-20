@@ -173,6 +173,10 @@ pub enum DecodeError {
     Address(&'static str, usize),
     #[error("sender is empty")]
     EmptySender,
+    #[error("nonce_keys: {0}")]
+    NonceKeys(&'static str),
+    #[error("frames: {0} frames, not 1 to {max}", max = crate::constants::MAX_FRAMES)]
+    Frames(usize),
 }
 
 // ---- encoding ----
@@ -317,7 +321,10 @@ impl FrameTx {
         out
     }
 
-    /// Parse a raw `0x06...` transaction. Structural only: canonical RLP, no validity checks.
+    /// Parse a raw `0x06...` transaction: canonical RLP, and what EIP-8141 and EIP-8250 say a
+    /// decoder must refuse. That is 1 to 16 nonce keys, strictly increasing, key 0 only alone,
+    /// and 1 to 64 frames (exp-e2e-frames' interop entry I2 found these accepted). No other
+    /// validity checks. `chain_id` is read as a `u64`, which EIP-8141 does not limit.
     pub fn decode(raw: &[u8]) -> Result<Self, DecodeError> {
         let Some((&FRAME_TX_TYPE, mut rest)) = raw.split_first() else {
             return Err(DecodeError::NotFrameTx);
@@ -330,6 +337,15 @@ impl FrameTx {
         let mut nonce_keys = Vec::new();
         while !keys.is_empty() {
             nonce_keys.push(U256::decode(&mut keys)?);
+        }
+        if nonce_keys.is_empty() || nonce_keys.len() > crate::constants::MAX_NONCE_KEYS {
+            return Err(DecodeError::NonceKeys("not 1 to 16 keys"));
+        }
+        if nonce_keys.windows(2).any(|w| w[0] >= w[1]) {
+            return Err(DecodeError::NonceKeys("not strictly increasing"));
+        }
+        if nonce_keys.len() > 1 && nonce_keys[0].is_zero() {
+            return Err(DecodeError::NonceKeys("key 0 is valid only alone"));
         }
         let nonce_seq = u64::decode(&mut env)?;
         let sender = decode_opt_address(&mut env, "sender")?.ok_or(DecodeError::EmptySender)?;
@@ -358,6 +374,10 @@ impl FrameTx {
                 value,
                 data,
             });
+        }
+
+        if frames.is_empty() || frames.len() > crate::constants::MAX_FRAMES {
+            return Err(DecodeError::Frames(frames.len()));
         }
 
         let mut sigs_rlp = list(&mut env, "signatures")?;

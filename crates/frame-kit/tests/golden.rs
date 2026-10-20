@@ -93,3 +93,35 @@ fn rejects_non_canonical_input() {
         Err(DecodeError::Rlp(alloy::rlp::Error::NonCanonicalSingleByte))
     ));
 }
+
+/// What EIP-8141 and EIP-8250 say a decoder must refuse, as exp-e2e-frames' interop entry I2
+/// tests it: the golden transaction re-encoded with each fault.
+#[test]
+fn refuses_what_the_eips_say_a_decoder_must() {
+    let refused = |tx: FrameTx| FrameTx::decode(&tx.encode()).unwrap_err();
+    let with_keys = |keys: &[u64]| FrameTx {
+        nonce_keys: keys.iter().map(|&k| U256::from(k)).collect(),
+        ..golden()
+    };
+    for (keys, why) in [
+        (vec![], "not 1 to 16 keys"),
+        ((1..=17).collect(), "not 1 to 16 keys"),
+        (vec![2, 1], "not strictly increasing"),
+        (vec![1, 1], "not strictly increasing"),
+        (vec![0, 5], "key 0 is valid only alone"),
+    ] {
+        assert!(
+            matches!(refused(with_keys(&keys)), DecodeError::NonceKeys(w) if w == why),
+            "{keys:?}"
+        );
+    }
+    assert!(matches!(
+        refused(FrameTx {
+            frames: vec![],
+            ..golden()
+        }),
+        DecodeError::Frames(0)
+    ));
+    // Still decodes: one key, or several in order.
+    assert!(FrameTx::decode(&with_keys(&[1, 2, 3]).encode()).is_ok());
+}
