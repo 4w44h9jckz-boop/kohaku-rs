@@ -215,3 +215,99 @@ impl PermissionRequest {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloy::primitives::address;
+
+    use super::*;
+
+    const ACCOUNT: Address = address!("0x00000000000000000000000000000000000000aa");
+    const TOKEN: Address = address!("0x00000000000000000000000000000000000000bb");
+
+    fn request(rules: &Value) -> PermissionRequest {
+        serde_json::from_value(json!({
+            "chainId": "0x1fcd",
+            "from": ACCOUNT,
+            "to": "0x00000000000000000000000000000000000000cc",
+            "permission": {
+                "type": NATIVE_TOKEN_ALLOWANCE,
+                "isAdjustmentAllowed": false,
+                "data": { "allowance": "0x2386f26fc10000" },
+            },
+            "rules": rules,
+        }))
+        .unwrap()
+    }
+
+    fn scoped(selector: &str) -> Value {
+        json!([
+            { "type": EXPIRY, "data": { "timestamp": 1_800_000_000u64 } },
+            { "type": CALL_TARGET, "data": { "target": TOKEN, "selector": selector } },
+        ])
+    }
+
+    #[test]
+    fn grants_a_scoped_allowance_as_a_session() {
+        let policy = request(&scoped("0x095ea7b3"))
+            .policy(8141, ACCOUNT)
+            .unwrap();
+        assert_eq!(
+            policy,
+            SessionPolicy {
+                target: TOKEN,
+                selector: [0x09, 0x5e, 0xa7, 0xb3],
+                valid_until: 1_800_000_000,
+                budget: 10_000_000_000_000_000,
+            }
+        );
+        // No selector: plain transfers with no data.
+        assert_eq!(
+            request(&scoped("0x"))
+                .policy(8141, ACCOUNT)
+                .unwrap()
+                .selector,
+            [0; 4]
+        );
+    }
+
+    #[test]
+    fn refuses_what_the_account_cannot_enforce() {
+        let refuse = |r: PermissionRequest| r.policy(8141, ACCOUNT).unwrap_err().code;
+        let mut rules = scoped("0x095ea7b3");
+        rules
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "type": "rate-limit", "data": {} }));
+        assert_eq!(refuse(request(&rules)), -32602);
+        assert_eq!(refuse(request(&json!([scoped("0x")[1].clone()]))), -32602);
+        assert_eq!(refuse(request(&json!([scoped("0x")[0].clone()]))), -32602);
+        assert_eq!(refuse(request(&scoped("0x0102"))), -32602);
+        let mut other = request(&scoped("0x"));
+        other.permission.kind = "erc20-token-allowance".to_owned();
+        assert_eq!(refuse(other), -32602);
+        let mut itself = request(&scoped("0x"));
+        itself.rules[1].data["target"] = json!(ACCOUNT);
+        assert_eq!(refuse(itself), -32602);
+        assert_eq!(
+            request(&scoped("0x")).policy(1, ACCOUNT).unwrap_err().code,
+            5710
+        );
+    }
+
+    #[test]
+    fn answers_with_the_binding_fields() {
+        let r = request(&scoped("0x"));
+        let g = Granted {
+            policy: r.policy(8141, ACCOUNT).unwrap(),
+            key: r.to,
+            account: ACCOUNT,
+            request: r,
+        };
+        let out = g.response();
+        assert_eq!(out["context"], json!(context_of(ACCOUNT, g.key)));
+        assert_eq!(out["delegationManager"], json!(ACCOUNT));
+        assert_eq!(out["dependencies"], json!([]));
+        assert_eq!(out["permission"]["type"], json!(NATIVE_TOKEN_ALLOWANCE));
+    }
+}

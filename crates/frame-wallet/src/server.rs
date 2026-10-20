@@ -1,8 +1,9 @@
 //! The wallet as an EIP-1193 provider over HTTP JSON-RPC, so a dapp in any language can talk to
 //! it: `wallet_*` methods are the wallet's, everything else goes to the node.
 //!
-//! `kohaku_getBatch` is not a standard method. It returns what the wallet recorded about a
-//! batch (its hash, round trips and limits), for experiments that report them.
+//! `kohaku_getBatch` and `kohaku_getOwnerTransactions` are not standard methods. They return
+//! what the wallet recorded about a batch (its hash, round trips and limits) and the grants and
+//! revocations it sent, for experiments that report them.
 
 use std::sync::Arc;
 
@@ -63,6 +64,13 @@ pub async fn dispatch(
                 .map(|b| serde_json::to_value(b).unwrap_or_default())
                 .ok_or_else(|| ProviderError::new(5730, "unknown bundle id"))
         }
+        "kohaku_getOwnerTransactions" => {
+            Ok(serde_json::to_value(w.owner_txs()).unwrap_or_default())
+        }
+        // A wallet method this wallet does not have is its own answer to give, not the node's.
+        m if m.starts_with("wallet_") => Err(ProviderError::unsupported_method(format!(
+            "{m} is not supported"
+        ))),
         _ => {
             let provider = w.provider().clone();
             drop(w);

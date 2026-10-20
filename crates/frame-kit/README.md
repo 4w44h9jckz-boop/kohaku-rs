@@ -18,7 +18,7 @@ transaction here.
   has been built on the receipt's block (`wait_for_confirmed_receipt`): ethrex can serve a receipt
   from a block it then replaces.
 
-The tests are offline. They re-encode 197 transactions mined on the testnet, by the `exp-frames`
+The tests are offline. They re-encode 201 transactions mined on the testnet, by the `exp-frames`
 experiments and by the `kohaku-frame-pool` and `kohaku-frame-accounts` examples
 (`tests/fixtures/chain/`: every Hegota fixture `exp-frames` keeps, copied unchanged), to their
 on-chain hashes; check every secp256k1 and P256 signature over the signature hash computed here,

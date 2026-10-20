@@ -100,6 +100,17 @@ pub struct Wallet {
     chain_id: u64,
     batches: HashMap<String, Batch>,
     granted: Vec<Granted>,
+    owner_txs: Vec<OwnerTx>,
+}
+
+/// A transaction the account's owner sent for the dapp: a grant or a revocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnerTx {
+    pub purpose: String,
+    pub hash: B256,
+    pub block_number: U256,
+    pub gas_used: U256,
 }
 
 fn limits(tx: &FrameTx) -> U64 {
@@ -131,6 +142,7 @@ impl Wallet {
             chain_id,
             batches: HashMap::new(),
             granted: Vec::new(),
+            owner_txs: Vec::new(),
         })
     }
 
@@ -153,6 +165,12 @@ impl Wallet {
     #[must_use]
     pub fn chain_id(&self) -> u64 {
         self.chain_id
+    }
+
+    /// The grants and revocations the owner has sent, in order.
+    #[must_use]
+    pub fn owner_txs(&self) -> &[OwnerTx] {
+        &self.owner_txs
     }
 
     #[must_use]
@@ -444,7 +462,7 @@ impl Wallet {
     }
 
     /// The owner's own transaction making `frames`, sent and confirmed.
-    async fn owner_tx(&self, frames: Vec<Frame>) -> Result<B256, ProviderError> {
+    async fn owner_tx(&mut self, purpose: &str, frames: Vec<Frame>) -> Result<B256, ProviderError> {
         let envelope = self.envelope().await?;
         let mut tx = TxPlan::new(&self.account)
             .calls(frames)
@@ -460,6 +478,12 @@ impl Wallet {
                 executed.hash
             )));
         }
+        self.owner_txs.push(OwnerTx {
+            purpose: purpose.to_owned(),
+            hash: executed.hash,
+            block_number: executed.receipt.block_number,
+            gas_used: executed.receipt.gas_used,
+        });
         Ok(executed.hash)
     }
 
@@ -489,7 +513,7 @@ impl Wallet {
             .zip(&policies)
             .map(|(r, p)| account.add_session(r.to, p))
             .collect();
-        self.owner_tx(frames).await?;
+        self.owner_tx("grant", frames).await?;
         let granted: Vec<Granted> = requests
             .into_iter()
             .zip(policies)
@@ -521,7 +545,7 @@ impl Wallet {
             .ok_or_else(|| {
                 ProviderError::invalid_params("no granted permission has this context")
             })?;
-        self.owner_tx(vec![account.revoke_session(self.granted[i].key)])
+        self.owner_tx("revoke", vec![account.revoke_session(self.granted[i].key)])
             .await?;
         self.granted.remove(i);
         Ok(json!({}))
