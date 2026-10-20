@@ -98,6 +98,15 @@ pub struct Secret {
     s: Vec<u32>,
 }
 
+impl Secret {
+    /// The secret itself, which opens the query: what a reader discloses to make a signed
+    /// answer evidence. Whoever holds it learns which column the query read.
+    #[must_use]
+    pub fn open(&self) -> &[u32] {
+        &self.s
+    }
+}
+
 impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Secret(..)")
