@@ -159,6 +159,16 @@ pub struct FrameTx {
     pub blob_versioned_hashes: Vec<B256>,
 }
 
+/// The EIP-8250 revision whose nonce-key rules a decoder applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Eip8250 {
+    /// `f3079a09e8`, which the Hegota testnet pins: `[0]` is the legacy nonce, key 0 is valid only
+    /// alone, and `[]` is refused.
+    F3079a0,
+    /// Master at `1a086d5c`: `[]` is the legacy nonce and key 0 is an ordinary key.
+    Master,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
     #[error("not a type-0x06 transaction")]
@@ -177,6 +187,29 @@ pub enum DecodeError {
     NonceKeys(&'static str),
     #[error("frames: {0} frames, not 1 to {max}", max = crate::constants::MAX_FRAMES)]
     Frames(usize),
+}
+
+/// What EIP-8250, at `rules`, says a decoder must refuse in a transaction's nonce keys.
+fn check_nonce_keys(keys: &[U256], nonce_seq: u64, rules: Eip8250) -> Result<(), DecodeError> {
+    if keys.len() > crate::constants::MAX_NONCE_KEYS {
+        return Err(DecodeError::NonceKeys(match rules {
+            Eip8250::F3079a0 => "not 1 to 16 keys",
+            Eip8250::Master => "more than 16 keys",
+        }));
+    }
+    if keys.windows(2).any(|w| w[0] >= w[1]) {
+        return Err(DecodeError::NonceKeys("not strictly increasing"));
+    }
+    match rules {
+        Eip8250::F3079a0 if keys.is_empty() => Err(DecodeError::NonceKeys("not 1 to 16 keys")),
+        Eip8250::F3079a0 if keys.len() > 1 && keys[0].is_zero() => {
+            Err(DecodeError::NonceKeys("key 0 is valid only alone"))
+        }
+        Eip8250::Master if keys.is_empty() && nonce_seq == u64::MAX => {
+            Err(DecodeError::NonceKeys("the legacy nonce at MAX_NONCE_SEQ"))
+        }
+        _ => Ok(()),
+    }
 }
 
 // ---- encoding ----
@@ -322,10 +355,16 @@ impl FrameTx {
     }
 
     /// Parse a raw `0x06...` transaction: canonical RLP, and what EIP-8141 and EIP-8250 say a
-    /// decoder must refuse. That is 1 to 16 nonce keys, strictly increasing, key 0 only alone,
-    /// and 1 to 64 frames (exp-e2e-frames' interop entry I2 found these accepted). No other
-    /// validity checks. `chain_id` is read as a `u64`, which EIP-8141 does not limit.
+    /// decoder must refuse, under the EIP-8250 the Hegota testnet pins ([`Eip8250::F3079a0`]).
+    /// That is 1 to 16 nonce keys, strictly increasing, key 0 only alone, and 1 to 64 frames
+    /// (exp-e2e-frames' interop entry I2 found these accepted). No other validity checks.
+    /// `chain_id` is read as a `u64`, which EIP-8141 does not limit.
     pub fn decode(raw: &[u8]) -> Result<Self, DecodeError> {
+        Self::decode_with(raw, Eip8250::F3079a0)
+    }
+
+    /// [`FrameTx::decode`], under the nonce-key rules of `rules`.
+    pub fn decode_with(raw: &[u8], rules: Eip8250) -> Result<Self, DecodeError> {
         let Some((&FRAME_TX_TYPE, mut rest)) = raw.split_first() else {
             return Err(DecodeError::NotFrameTx);
         };
@@ -338,16 +377,8 @@ impl FrameTx {
         while !keys.is_empty() {
             nonce_keys.push(U256::decode(&mut keys)?);
         }
-        if nonce_keys.is_empty() || nonce_keys.len() > crate::constants::MAX_NONCE_KEYS {
-            return Err(DecodeError::NonceKeys("not 1 to 16 keys"));
-        }
-        if nonce_keys.windows(2).any(|w| w[0] >= w[1]) {
-            return Err(DecodeError::NonceKeys("not strictly increasing"));
-        }
-        if nonce_keys.len() > 1 && nonce_keys[0].is_zero() {
-            return Err(DecodeError::NonceKeys("key 0 is valid only alone"));
-        }
         let nonce_seq = u64::decode(&mut env)?;
+        check_nonce_keys(&nonce_keys, nonce_seq, rules)?;
         let sender = decode_opt_address(&mut env, "sender")?.ok_or(DecodeError::EmptySender)?;
 
         let mut frames_rlp = list(&mut env, "frames")?;

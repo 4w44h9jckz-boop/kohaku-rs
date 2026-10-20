@@ -26,5 +26,8 @@ and that every `ARBITRARY` entry names no signer, since the account's own `VERIF
 settle each one to its receipt's `gasUsed`; and match the
 golden vector in ethrex's `scripts/hegota-testnet/frametx.py`. `tests/mempool.rs` checks the
 replacement rule and the receipt rule, both from `exp-frames` experiment 19, against a mocked
-node. `tests/execution_digest.rs` computes experiment 27's ten vectors through alloy's EIP-712
-encoder and matches the digests viem produced for them.
+node. `tests/execution_digest.rs` computes experiment 27's vectors through alloy's EIP-712 encoder and
+matches the digests viem produced for them, in both of its sets: eleven under EIP-8250 at master,
+where `nonce_keys == []` selects the legacy nonce, and ten under `f3079a09e8`, which the Hegota
+testnet pins, where `[0]` did. `FrameTx::decode` applies the testnet's nonce-key rules;
+`FrameTx::decode_with(raw, Eip8250::Master)` applies master's.

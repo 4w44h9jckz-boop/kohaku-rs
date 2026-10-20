@@ -1,0 +1,29 @@
+[package]
+name = "kohaku-frame-ticket"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy = { workspace = true }
+blst = { workspace = true }
+commonware-codec = { workspace = true }
+commonware-cryptography = { workspace = true }
+commonware-math = { workspace = true }
+commonware-parallel = { workspace = true }
+commonware-utils = { workspace = true }
+hex = { workspace = true }
+kohaku-frame-accounts = { workspace = true }
+kohaku-frame-kit = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+num-bigint = { workspace = true }
+sha2 = { workspace = true }

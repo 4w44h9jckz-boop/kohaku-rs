@@ -232,9 +232,9 @@ pub async fn priced_withdrawal<P: Provider>(
 /// A batch of pool-paid withdrawals from one wallet, from a keyed pool, all against the same
 /// root: one per `(note, recipient)`, each priced as [`priced_withdrawal`] prices one. Each has
 /// its own nullifier hash as its only nonce key, so no two share a key, and none reads the
-/// pool's storage in `VERIFY`. A node that admits disjoint keys from one sender (emem's
-/// `disjoint-keys`) can hold them all at once, and the wallet sends them without waiting for
-/// one to be mined before the next.
+/// pool's storage in `VERIFY`. A node that admits disjoint keys from one sender (the mempool
+/// specification's `disjoint-keys`) can hold them all at once, and the wallet sends them without
+/// waiting for one to be mined before the next.
 ///
 /// Refuses a storage pool, whose withdrawals share the pool's account nonce, and two spends of
 /// one note, which share a key: the second could only replace the first.

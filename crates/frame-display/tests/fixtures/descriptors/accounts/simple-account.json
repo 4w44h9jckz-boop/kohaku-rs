@@ -1,0 +1,20 @@
+{
+  "$schema": "../../format.md#account-descriptors",
+  "context": {
+    "$id": "SimpleAccount",
+    "account": {
+      "creationCode": "0x6020604d8060155f398138601f19018239015ff3fe60aa3314600857005b600ab06001600282b314601757005b600bb0156049576001805fb403604957602038601f19015f395f515f80b40360495760025fb4604957600690b35f80aa005b5f80fd",
+      "args": "(address owner)"
+    }
+  },
+  "metadata": { "owner": "exp-frames", "contractName": "SimpleAccount" },
+  "verify": [
+    {
+      "entry": 0,
+      "signer": "owner",
+      "msg": "sigHash",
+      "approves": "allowed",
+      "intent": "Your owner key approves the whole transaction"
+    }
+  ]
+}

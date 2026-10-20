@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync"] }
 
 [dev-dependencies]
+kohaku-frame-display = { workspace = true }
 reqwest = { workspace = true }
 
 [lints]
