@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+pub mod chain;
 pub mod withdrawal;
 
 use alloy::primitives::{Address, B256, Bytes, U256};

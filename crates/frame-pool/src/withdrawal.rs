@@ -9,6 +9,10 @@
 //!                 VERIFY(pool, 3)               VERIFY(pool, 2)
 //!                 SENDER(pool, withdraw)        VERIFY(sponsor, 1)
 //!                                               SENDER(pool, withdraw)
+//! refund pool     VERIFY(0x8272, root tuple)    -
+//!                 VERIFY(pool, 3)
+//!                 SENDER(pool, withdraw)
+//!                 DEFAULT(pool), the refund
 //! ```
 //!
 //! The pool's `VERIFY` reads the proof and its six public inputs out of the `SENDER` frame's
@@ -16,6 +20,12 @@
 //! nullifiers up in its own storage and uses the account nonce; a keyed pool reads no storage:
 //! the nullifier hash is the transaction's EIP-8250 nonce key, which the protocol consumes, and
 //! the root is checked by the EIP-8272 frame in front of it.
+//!
+//! A refund pool is a keyed pool that always pays its own gas and adds a last `DEFAULT` frame.
+//! The note's fee must cover the transaction's max cost, which is every limit at the max fee, and
+//! the chain charges what was used at the price paid. The last frame sends the recipient the fee
+//! less an upper bound on that charge, so the note pays about its gas and not its max cost
+//! (`exp-frames` experiment 30, `RefundPool.yul`).
 
 use alloy::{
     primitives::{Address, B256, Bytes, U256, keccak256},
@@ -23,7 +33,7 @@ use alloy::{
 };
 use kohaku_frame_kit::{
     Fees, Frame, FrameTx,
-    constants::{NEW_ACCOUNT_STATE_GAS, RECENT_ROOT, STORAGE_SET_STATE_GAS, approve},
+    constants::{NEW_ACCOUNT_STATE_GAS, RECENT_ROOT, STORAGE_SET_STATE_GAS, approve, mode},
     gas::{UnknownScheme, max_cost},
 };
 
@@ -45,6 +55,8 @@ pub mod abi {
         event Deposit(bytes32 indexed commitment, uint32 leafIndex, uint256 timestamp);
         event Withdrawal(address to, bytes32 nullifierHash, address indexed relayer, uint256 fee);
         event RecentRoot(bytes32 root, uint64 slot);
+        /// A refund pool's last frame: what it sent back, and its bound on the charge.
+        event FeeRefund(address indexed recipient, uint256 refunded, uint256 chargedAtMost);
     }
 }
 
@@ -62,6 +74,14 @@ pub const POOL_FEES: Fees = Fees {
 pub const WITHDRAW_EXECUTION: u64 = 100_000;
 /// Execution gas for the pool's `VERIFY`: a Groth16 check is about 245,000.
 pub const VERIFY_EXECUTION: u64 = 400_000;
+/// Execution gas for the EIP-8272 verifier frame.
+pub const RECENT_ROOT_EXECUTION: u64 = 10_000;
+/// Execution gas for a sponsor's `VERIFY`.
+pub const SPONSOR_EXECUTION: u64 = 10_000;
+/// Execution gas for a refund pool's last frame before it is tightened.
+pub const REFUND_EXECUTION: u64 = 50_000;
+/// The least execution gas a refund pool accepts for its last frame (`POST_OP_GAS`).
+pub const REFUND_EXECUTION_FLOOR: u64 = 25_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PoolMode {
@@ -70,6 +90,17 @@ pub enum PoolMode {
     /// The nullifier hash as an EIP-8250 nonce key and roots through EIP-8272: `VERIFY` reads no
     /// storage, so withdrawals from different notes do not conflict in the mempool.
     Keyed,
+    /// A keyed pool that pays its own gas and refunds the fee's surplus in a last `DEFAULT`
+    /// frame: `RefundPool.yul`, `exp-frames` experiment 30.
+    Refund,
+}
+
+impl PoolMode {
+    /// Whether the nullifier hash is the nonce key and the root goes through EIP-8272.
+    #[must_use]
+    pub fn is_keyed(self) -> bool {
+        matches!(self, Self::Keyed | Self::Refund)
+    }
 }
 
 /// A deployed frame-native pool.
@@ -98,7 +129,7 @@ impl FramePool {
     pub fn withdraw_state_floor(&self, relayer_is_pool: bool) -> u64 {
         let nullifier = match self.mode {
             PoolMode::Storage => STORAGE_SET_STATE_GAS,
-            PoolMode::Keyed => 0,
+            PoolMode::Keyed | PoolMode::Refund => 0,
         };
         let credit = if relayer_is_pool {
             0
@@ -133,11 +164,48 @@ pub fn recent_root_frame(source_id: B256, slot: u64, root: B256) -> Frame {
     data.extend_from_slice(&slot.to_be_bytes());
     data.extend_from_slice(root.as_slice());
     Frame::verify(approve::NONE, Some(RECENT_ROOT))
-        .with_execution(10_000)
+        .with_execution(RECENT_ROOT_EXECUTION)
         .with_data(data)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The least execution gas the pool accepts for `frame`: the withdrawal frame's floor, so that
+/// nobody can starve it after approval, and a refund frame's.
+#[must_use]
+pub fn execution_floor(frame: &Frame) -> u64 {
+    match frame.mode {
+        mode::SENDER => WITHDRAW_EXECUTION,
+        mode::DEFAULT => REFUND_EXECUTION_FLOOR,
+        _ => 0,
+    }
+}
+
+/// Execution limits from a simulation's per-frame use, as `exp-frames` experiment 28's wallet
+/// sets them: a quarter over the use plus 5,000, never below the pool's floor for the frame.
+#[must_use]
+pub fn tightened_limits(tx: &FrameTx, used: &[u64]) -> Vec<u64> {
+    tx.frames
+        .iter()
+        .zip(used)
+        .map(|(f, &u)| (u * 5 / 4 + 5_000).max(execution_floor(f)))
+        .collect()
+}
+
+/// The max cost of `tx` with every byte of every frame's data and of every nonce key non-zero.
+///
+/// A note's fee is fixed when the proof is made, and the proof's bytes are part of the calldata
+/// the fee must cover. Pricing the worst case lets the fee be chosen before the proof exists.
+pub fn worst_case_max_cost(tx: &FrameTx) -> Result<U256, UnknownScheme> {
+    let mut worst = tx.clone();
+    for f in &mut worst.frames {
+        f.data = vec![0xff; f.data.len()].into();
+    }
+    for k in &mut worst.nonce_keys {
+        *k = U256::MAX;
+    }
+    max_cost(&worst, 0)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithdrawalOpts {
     pub chain_id: u64,
     /// `None`: the pool pays the gas out of the fee. `Some`: a `PoolSponsor` at this address
@@ -148,6 +216,9 @@ pub struct WithdrawalOpts {
     /// Storage pools: the pool's account nonce.
     pub nonce: Option<u64>,
     pub verify_execution: u64,
+    /// Every frame's execution limit, in layout order, in place of the defaults; usually
+    /// [`tightened_limits`] of a simulation. Each must meet [`execution_floor`].
+    pub execution_limits: Option<Vec<u64>>,
     pub fees: Fees,
 }
 
@@ -160,6 +231,7 @@ impl WithdrawalOpts {
             root_slot: None,
             nonce: None,
             verify_execution: VERIFY_EXECUTION,
+            execution_limits: None,
             fees: POOL_FEES,
         }
     }
@@ -176,6 +248,16 @@ pub enum WithdrawalTxError {
     MissingSlot,
     #[error("a storage-pool withdrawal needs the pool's nonce")]
     MissingNonce,
+    #[error("a refund pool pays its own gas and takes no sponsor")]
+    SponsoredRefund,
+    #[error("{limits} execution limits for {frames} frames")]
+    Limits { frames: usize, limits: usize },
+    #[error("frame {frame}: execution limit {limit} is below the pool's floor {floor}")]
+    BelowFloor {
+        frame: usize,
+        limit: u64,
+        floor: u64,
+    },
     #[error("fee {fee} is below the transaction's max cost {max_cost}")]
     Fee { fee: U256, max_cost: U256 },
     #[error(transparent)]
@@ -203,7 +285,11 @@ pub fn withdrawal_tx(
     if !inputs.refund.is_zero() {
         return Err(WithdrawalTxError::Refund);
     }
-    let keyed = pool.mode == PoolMode::Keyed;
+    let refunds = pool.mode == PoolMode::Refund;
+    if refunds && opts.sponsor.is_some() {
+        return Err(WithdrawalTxError::SponsoredRefund);
+    }
+    let keyed = pool.mode.is_keyed();
     // EIP-8250 charges the first use of a nonce key to whichever frame approves payment.
     let first_use = if keyed { STORAGE_SET_STATE_GAS } else { 0 };
 
@@ -224,7 +310,7 @@ pub fn withdrawal_tx(
     if let Some(sponsor) = opts.sponsor {
         frames.push(
             Frame::verify(approve::PAYMENT, Some(sponsor))
-                .with_execution(10_000)
+                .with_execution(SPONSOR_EXECUTION)
                 .with_state(first_use),
         );
     }
@@ -234,6 +320,28 @@ pub fn withdrawal_tx(
             .with_state(pool.withdraw_state_floor(opts.sponsor.is_none()))
             .with_data(withdraw_calldata(inputs, proof)),
     );
+    if refunds {
+        frames.push(Frame::entry_point(Some(pool.address)).with_execution(REFUND_EXECUTION));
+    }
+    if let Some(limits) = &opts.execution_limits {
+        if limits.len() != frames.len() {
+            return Err(WithdrawalTxError::Limits {
+                frames: frames.len(),
+                limits: limits.len(),
+            });
+        }
+        for (i, (f, &limit)) in frames.iter_mut().zip(limits).enumerate() {
+            let floor = execution_floor(f);
+            if limit < floor {
+                return Err(WithdrawalTxError::BelowFloor {
+                    frame: i,
+                    limit,
+                    floor,
+                });
+            }
+            f.limits.execution = limit;
+        }
+    }
 
     let (nonce_keys, nonce_seq) = if keyed {
         (vec![U256::from_be_bytes(inputs.nullifier_hash.0)], 0)
