@@ -70,3 +70,26 @@ On 2026-10-20 it found the board's 6 messages. Bob's key opened 3 offers and Ali
 For the first pair, the two notes the swap had to create, computed from the decrypted terms
 alone, were both in the registry, and both nullifiers were used. For the other two, only the
 offerer's nullifier was used, by Alice's cancel, and the acceptor's note was still his.
+
+## Custody per application (`exp-frames` experiment 40)
+
+`custody` is the vaulted registry: experiment 32's tree, verifier and nonce space, with each
+application's value in a vault of its own (`Vault.yul`) that pays only that application's
+withdrawals, on the registry's call. The registry computes a vault's scope,
+`SHA-256(0x91 || params || uint64be(chain id) || vault) mod p`, from the vault's address, and
+every note under it, so a note opens against one vault only. Each proof is bound to a context,
+`SHA-256(0x61 || recipient || fee || max_priority_fee_per_gas || max_fee_per_gas) >> 8`, which the
+registry's `VERIFY` computes from the transaction's own fees. An update carries no signature, so
+without the fees in the context anyone holding a pending one could send it again with a higher
+priority fee and pay the difference to the block's producer, which experiment 40's control did
+against experiment 32's registry. The kernel and its key are unchanged: the scope is its `tag` and
+the context its `binding`. `VERIFY` reads no storage.
+
+`tests/custody.rs` checks experiment 40's mined transactions with this crate alone:
+- the registry and the three vaults are at the testnet's addresses;
+- each scope is the one the TypeScript computed, and A and its twin C, with the same parameters,
+  have different scopes;
+- each deposit's leaf is its call's under its vault's scope;
+- each update is rebuilt byte for byte, and its proof verifies under its own vault's scope and its
+  own fees, and under no other vault's and with no other fees;
+- both payments in each update frame, the recipient's and the fee, were made by the note's vault.
