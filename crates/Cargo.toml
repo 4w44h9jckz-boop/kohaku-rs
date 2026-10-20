@@ -5,6 +5,7 @@ members = [
     "frame-kit",
     "frame-pool",
     "frame-registry",
+    "frame-ticket",
     "frame-wallet",
     "merkle-tree",
     "tornadocash",
@@ -30,8 +31,14 @@ ark-ec = "0.6.0"
 ark-ff = "0.6.0"
 async-trait = "0.1.92"
 blake-hash = "0.2.0"
+blst = "0.3.16"
 brotli = "9.0.0"
 cfg_aliases = "0.2.2"
+commonware-codec = "2026.9.0"
+commonware-cryptography = "2026.9.0"
+commonware-math = "2026.9.0"
+commonware-parallel = "2026.9.0"
+commonware-utils = "2026.9.0"
 criterion = "0.8.2"
 flate2 = "1.1"
 futures = "0.3"
@@ -44,6 +51,7 @@ kohaku-frame-accounts = { path = "frame-accounts" }
 kohaku-frame-kit = { path = "frame-kit" }
 kohaku-frame-pool = { path = "frame-pool" }
 kohaku-frame-registry = { path = "frame-registry" }
+kohaku-frame-ticket = { path = "frame-ticket" }
 kohaku-frame-wallet = { path = "frame-wallet" }
 kohaku-merkle-tree = { path = "merkle-tree" }
 kohaku-tornadocash = { path = "tornadocash" }
