@@ -11,7 +11,7 @@ use alloy::{
 };
 use kohaku_frame_kit::{Fees, FrameTx, constants::mode, json::FrameTxJson};
 use kohaku_frame_registry::{
-    Application, Note, Registry, Rule, Secrets, Spend, Update, Verifier,
+    Application, Note, Registry, Rule, Secrets, Spend, Update, Verifier, Version,
     contracts::kernel_key,
     note::{leaf, tag},
     update::{UpdateError, abi::depositCall, decode_update, root_of, update_tx, word_field},
@@ -51,6 +51,7 @@ fn verifier() -> Verifier {
 
 fn registry() -> Registry {
     Registry {
+        version: Version::V1,
         hasher: HASHER,
         verifier: verifier().address(),
         root_salt: keccak256("exp-frames/32/registry"),
@@ -209,13 +210,14 @@ fn rebuilds_every_update_and_verifies_its_proof() {
             mined.chain_id,
             root,
             slot,
+            None,
             &updates,
             mined.fees,
         )
         .unwrap();
         assert_eq!(rebuilt, mined);
         for u in &updates {
-            assert!(key.verify(&u.proof, &u.public_inputs(root)));
+            assert!(key.verify(&u.proof, &u.public_inputs(root, None)));
             let owner = app(Address::from_word(u.tag.into()));
             assert!(owner.rule.allows(u.withdrawn, !u.new_commitment.is_zero()));
             // The proof binds the tag, the recipient and the fee.
@@ -228,12 +230,12 @@ fn rebuilds_every_update_and_verifies_its_proof() {
                 tag: tag(other).into(),
                 ..*u
             };
-            assert!(!key.verify(&as_other.proof, &as_other.public_inputs(root)));
+            assert!(!key.verify(&as_other.proof, &as_other.public_inputs(root, None)));
             let redirected = Update {
                 recipient: Address::repeat_byte(0x11),
                 ..*u
             };
-            assert!(!key.verify(&redirected.proof, &redirected.public_inputs(root)));
+            assert!(!key.verify(&redirected.proof, &redirected.public_inputs(root, None)));
         }
     }
 }
@@ -285,6 +287,7 @@ fn a_spend_gives_the_typescript_kernel_input() {
         recipient: address!("0x000000000000000000000000000000000000dEaD"),
         fee: U256::from(10_000_000_000u64),
         link: U256::ZERO,
+        deadline: None,
     };
     let input = spend.kernel_input(&leaves).unwrap();
     let i = &v["input"];
@@ -326,7 +329,7 @@ fn refuses_what_the_registry_refuses() {
         link: U256::from(link),
         proof: [U256::ZERO; 8],
     };
-    let tx = |us: &[Update]| update_tx(&registry(), 8141, U256::ZERO, 0, us, Fees::default());
+    let tx = |us: &[Update]| update_tx(&registry(), 8141, U256::ZERO, 0, None, us, Fees::default());
     assert_eq!(tx(&[]).unwrap_err(), UpdateError::Count(0));
     assert_eq!(
         tx(&[u(1, 0), u(2, 0), u(3, 0)]).unwrap_err(),

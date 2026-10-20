@@ -11,12 +11,17 @@
 //! - [`update`]: a deposit frame, the kernel's input for a spend, and the update transaction.
 //! - [`contracts`]: the registry, the verifier and the applications, and their addresses.
 //! - [`groth16`]: the verifier's check, in Rust.
+//! - [`announce`]: encrypted announcements on a board, and a swap's offer and answer.
+//!
+//! Version 2 of the registry (`exp-frames` experiment 33) adds a deadline to every proof and
+//! makes a pair of updates a fair swap: each names the other's nullifier and change note.
 
+pub mod announce;
 pub mod contracts;
 pub mod groth16;
 pub mod note;
 pub mod update;
 
-pub use contracts::{Application, Registry, Rule, Verifier};
+pub use contracts::{Application, Board, Registry, Rule, Verifier, Version};
 pub use note::{Note, Secrets};
 pub use update::{Spend, Update, update_tx};

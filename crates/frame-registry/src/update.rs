@@ -4,10 +4,14 @@
 //! nullifiers as its EIP-8250 nonce keys in ascending order at sequence 0, and exactly
 //!
 //! ```text
-//! frame 0  VERIFY  0x8272: source_id || slot || root
-//! frame 1  VERIFY  the registry, scope 3: layout, root, nonce keys, the app's rule, the proof
-//! frame 2  SENDER  the registry: update(bytes32 root, uint256[15][] updates)
+//! (version 2 only) VERIFY  0x8141: the deadline every proof binds
+//!                  VERIFY  0x8272: source_id || slot || root
+//!                  VERIFY  the registry, scope 3: layout, root, keys, the app's rule, the proofs
+//!                  SENDER  the registry: update(bytes32 root, uint256[15][] updates)
 //! ```
+//!
+//! A pair of updates settles a swap: under version 2 each names the other's nullifier and change
+//! note ([`pair_link`]), so neither proof is valid beside any other update.
 
 use alloy::{
     primitives::{Address, B256, Bytes, U256, keccak256},
@@ -21,7 +25,7 @@ use kohaku_frame_pool::withdrawal::recent_root_frame;
 use kohaku_tornadocash::{Field, merkle_tree::MerkleTree};
 
 use crate::{
-    contracts::Registry,
+    contracts::{Registry, Version},
     note::{Note, field, tag},
 };
 
@@ -46,6 +50,11 @@ pub const VERIFY_EXECUTION: u64 = 260_000;
 pub const UPDATE_EXECUTION: u64 = 100_000;
 pub const INSERT_EXECUTION: u64 = 1_200_000;
 pub const INSERT_STATE: u64 = 2 * STORAGE_SET_STATE_GAS;
+/// Version 2's prefix: the expiry frame, the recent-root frame and, for a pair, two Groth16
+/// checks (454,891 on the testnet), within the testnet's 500,000.
+pub const EXPIRY_EXECUTION: u64 = 5_000;
+pub const RECENT_ROOT_EXECUTION_V2: u64 = 6_000;
+pub const PAIR_VERIFY_EXECUTION: u64 = 480_000;
 
 /// A deposit of `value` wei into `app`, as a `SENDER` frame of the depositor's transaction. The
 /// registry's first insertion writes all 20 of the tree's slots; later ones write none.
@@ -80,29 +89,30 @@ pub struct Update {
     pub recipient: Address,
     /// Kept by the registry for the gas it pays.
     pub fee: U256,
-    /// The other update's nullifier in a pair, so that neither is valid alone; zero alone.
+    /// In a pair, what the other update is (version 1: its nullifier; version 2:
+    /// [`pair_link`] of it), so that neither is valid alone; zero alone.
     pub link: U256,
     /// A.x A.y B.x1 B.x0 B.y1 B.y0 C.x C.y
     pub proof: [U256; 8],
 }
 
 impl Update {
-    /// What the registry binds to the proof: `keccak256(recipient || fee || link) >> 8`.
+    /// What the registry binds to the proof ([`binding`]); `deadline` under version 2.
     #[must_use]
-    pub fn binding(&self) -> U256 {
-        binding(self.recipient, self.fee, self.link)
+    pub fn binding(&self, deadline: Option<u64>) -> U256 {
+        binding(self.recipient, self.fee, self.link, deadline)
     }
 
     /// The kernel's public inputs: root, nullifier, newCommitment, tag, withdrawn, binding.
     #[must_use]
-    pub fn public_inputs(&self, root: U256) -> [U256; 6] {
+    pub fn public_inputs(&self, root: U256, deadline: Option<u64>) -> [U256; 6] {
         [
             root,
             self.nullifier,
             self.new_commitment,
             self.tag,
             self.withdrawn,
-            self.binding(),
+            self.binding(deadline),
         ]
     }
 
@@ -139,14 +149,28 @@ impl Update {
     }
 }
 
-/// `keccak256(recipient || fee || link) >> 8`, the words as 32 bytes each.
+/// `keccak256(recipient || fee || link) >> 8` (version 1), or
+/// `keccak256(recipient || fee || link || deadline) >> 8` (version 2), the words as 32 bytes.
 #[must_use]
-pub fn binding(recipient: Address, fee: U256, link: U256) -> U256 {
-    let mut buf = [0u8; 96];
-    buf[12..32].copy_from_slice(recipient.as_slice());
-    buf[32..64].copy_from_slice(&fee.to_be_bytes::<32>());
-    buf[64..].copy_from_slice(&link.to_be_bytes::<32>());
+pub fn binding(recipient: Address, fee: U256, link: U256, deadline: Option<u64>) -> U256 {
+    let mut buf = Vec::with_capacity(128);
+    buf.extend_from_slice(&[0u8; 12]);
+    buf.extend_from_slice(recipient.as_slice());
+    buf.extend_from_slice(&fee.to_be_bytes::<32>());
+    buf.extend_from_slice(&link.to_be_bytes::<32>());
+    if let Some(d) = deadline {
+        buf.extend_from_slice(&U256::from(d).to_be_bytes::<32>());
+    }
     U256::from_be_bytes(keccak256(buf).0) >> 8
+}
+
+/// Version 2's link to the other update of a pair: `keccak256(nullifier || newCommitment)`.
+#[must_use]
+pub fn pair_link(nullifier: U256, new_commitment: U256) -> U256 {
+    let mut buf = [0u8; 64];
+    buf[..32].copy_from_slice(&nullifier.to_be_bytes::<32>());
+    buf[32..].copy_from_slice(&new_commitment.to_be_bytes::<32>());
+    U256::from_be_bytes(keccak256(buf).0)
 }
 
 /// Frame 2's data.
@@ -175,21 +199,25 @@ pub enum UpdateError {
     Count(usize),
     #[error("the nullifiers must be strictly ascending: they are the nonce keys")]
     Order,
-    #[error("a pair's updates must link to each other's nullifiers, a single one to none")]
+    #[error("a pair's updates must link to each other, a single one to nothing")]
     Link,
+    #[error("version 2 takes a deadline, version 1 none")]
+    Deadline,
     #[error("an update's fee is above what it withdraws")]
     Fee,
     #[error("not an update(bytes32,uint256[15][]) call")]
     Calldata,
 }
 
-/// The update, as the registry's `VERIFY` requires it. It refuses what that `VERIFY` would
-/// refuse for its shape; the proofs and the rules are the registry's to check.
+/// The update, as the registry's `VERIFY` requires it, with `deadline` for version 2. It
+/// refuses what that `VERIFY` would refuse for its shape, including a pair that does not link;
+/// the proofs and the rules are the registry's to check.
 pub fn update_tx(
     registry: &Registry,
     chain_id: u64,
     root: U256,
     slot: u64,
+    deadline: Option<u64>,
     updates: &[Update],
     fees: Fees,
 ) -> Result<FrameTx, UpdateError> {
@@ -197,12 +225,19 @@ pub fn update_tx(
     if !(1..=2).contains(&k) {
         return Err(UpdateError::Count(k));
     }
+    if (registry.version == Version::V2) != deadline.is_some() {
+        return Err(UpdateError::Deadline);
+    }
     if updates.windows(2).any(|w| w[0].nullifier >= w[1].nullifier) {
         return Err(UpdateError::Order);
     }
+    let names = |u: &Update, other: &Update| match registry.version {
+        Version::V1 => u.link == other.nullifier,
+        Version::V2 => u.link == pair_link(other.nullifier, other.new_commitment),
+    };
     let linked = match updates {
         [one] => one.link.is_zero(),
-        [a, b] => a.link == b.nullifier && b.link == a.nullifier,
+        [a, b] => names(a, b) && names(b, a),
         _ => false,
     };
     if !linked {
@@ -217,22 +252,42 @@ pub fn update_tx(
         .count() as u64;
     let payouts = updates.iter().filter(|u| u.withdrawn > u.fee).count() as u64;
     let k = k as u64;
+    let source_id = registry.source_id();
+    let (prefix, verify) = match deadline {
+        None => (
+            vec![recent_root_frame(source_id, slot, root.into())],
+            VERIFY_EXECUTION * k,
+        ),
+        Some(d) => (
+            vec![
+                Frame::expiry(d).with_execution(EXPIRY_EXECUTION),
+                recent_root_frame(source_id, slot, root.into())
+                    .with_execution(RECENT_ROOT_EXECUTION_V2),
+            ],
+            if k == 1 {
+                VERIFY_EXECUTION
+            } else {
+                PAIR_VERIFY_EXECUTION
+            },
+        ),
+    };
+    let mut frames = prefix;
+    frames.extend([
+        // The first use of each nonce key is paid by the frame that approves payment.
+        Frame::verify(approve::EXECUTION_AND_PAYMENT, None)
+            .with_execution(verify)
+            .with_state(STORAGE_SET_STATE_GAS * k),
+        Frame::sender(Some(registry.address()))
+            .with_data(update_calldata(root, updates))
+            .with_execution(UPDATE_EXECUTION * k + INSERT_EXECUTION * inserts)
+            .with_state(NEW_ACCOUNT_STATE_GAS * payouts + INSERT_STATE * inserts),
+    ]);
     Ok(FrameTx {
         chain_id,
         nonce_keys: updates.iter().map(|u| u.nullifier).collect(),
         nonce_seq: 0,
         sender: registry.address(),
-        frames: vec![
-            recent_root_frame(registry.source_id(), slot, root.into()),
-            // The first use of each nonce key is paid by the frame that approves payment.
-            Frame::verify(approve::EXECUTION_AND_PAYMENT, None)
-                .with_execution(VERIFY_EXECUTION * k)
-                .with_state(STORAGE_SET_STATE_GAS * k),
-            Frame::sender(Some(registry.address()))
-                .with_data(update_calldata(root, updates))
-                .with_execution(UPDATE_EXECUTION * k + INSERT_EXECUTION * inserts)
-                .with_state(NEW_ACCOUNT_STATE_GAS * payouts + INSERT_STATE * inserts),
-        ],
+        frames,
         signatures: vec![],
         fees,
         blob_versioned_hashes: vec![],
@@ -251,6 +306,8 @@ pub struct Spend {
     pub recipient: Address,
     pub fee: U256,
     pub link: U256,
+    /// Version 2: the deadline the proof binds.
+    pub deadline: Option<u64>,
 }
 
 /// The kernel circuit's input for a spend, the signals as `kernel.circom` names them: what a
@@ -308,7 +365,7 @@ impl Spend {
             new_commitment,
             tag: tag(self.note.app),
             withdrawn: self.withdrawn,
-            binding: binding(self.recipient, self.fee, self.link),
+            binding: binding(self.recipient, self.fee, self.link, self.deadline),
             nullifier_secret: self.note.secrets.nullifier_secret,
             secret: self.note.secrets.secret,
             state: self.note.state,

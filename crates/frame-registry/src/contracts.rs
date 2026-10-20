@@ -16,10 +16,25 @@ fn code(hex_code: &str) -> Vec<u8> {
     hex::decode(hex_code.trim()).expect("embedded creation code is hex")
 }
 
-/// `OwnedStateRegistry.yul`. Initcode: code `||` hasher `||` verifier `||` root salt.
+/// `OwnedStateRegistry.yul` (`exp-frames` experiment 32). Initcode: code `||` hasher `||`
+/// verifier `||` root salt.
 #[must_use]
 pub fn registry_code() -> Vec<u8> {
     code(include_str!("../contracts/OwnedStateRegistry.hex"))
+}
+
+/// `OwnedStateRegistryV2.yul` (`exp-frames` experiment 33): every proof binds the expiry
+/// frame's deadline, and a pair's updates name each other's nullifier and change note. The
+/// same initcode arguments as version 1.
+#[must_use]
+pub fn registry_v2_code() -> Vec<u8> {
+    code(include_str!("../contracts/OwnedStateRegistryV2.hex"))
+}
+
+/// `Board.yul` (`exp-frames` experiment 33): `post(bytes)` logs `Posted(bytes)`.
+#[must_use]
+pub fn board_code() -> Vec<u8> {
+    code(include_str!("../contracts/Board.hex"))
 }
 
 /// `Groth16Verifier.yul`. Initcode: code `||` the key's words (`VerifyingKey::words`).
@@ -88,9 +103,21 @@ impl Verifier {
     }
 }
 
+/// Which registry: the transaction layout, what a proof binds, and what a pair's link is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Version {
+    /// `[8272, VERIFY, SENDER]`; a pair's link is the other's nullifier, which makes the pair
+    /// atomic but not fair.
+    V1,
+    /// `[expiry, 8272, VERIFY, SENDER]`; every proof binds the deadline, and a pair's link is
+    /// `keccak256(nullifier || newCommitment)` of the other.
+    V2,
+}
+
 /// An `OwnedStateRegistry`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Registry {
+    pub version: Version,
     /// Tornado Cash's `MiMC` hasher.
     pub hasher: Address,
     pub verifier: Address,
@@ -103,7 +130,10 @@ pub struct Registry {
 impl Registry {
     #[must_use]
     pub fn initcode(&self) -> Vec<u8> {
-        let mut code = registry_code();
+        let mut code = match self.version {
+            Version::V1 => registry_code(),
+            Version::V2 => registry_v2_code(),
+        };
         code.extend_from_slice(&word(self.hasher));
         code.extend_from_slice(&word(self.verifier));
         code.extend_from_slice(self.root_salt.as_slice());
@@ -198,5 +228,23 @@ impl Application {
             _ => 0,
         };
         deploy_frame(&self.initcode(), self.salt, extra)
+    }
+}
+
+/// The board, deployed under a salt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Board {
+    pub salt: B256,
+}
+
+impl Board {
+    #[must_use]
+    pub fn address(&self) -> Address {
+        create2_address(&board_code(), self.salt)
+    }
+
+    #[must_use]
+    pub fn deploy_frame(&self) -> Frame {
+        deploy_frame(&board_code(), self.salt, 0)
     }
 }
