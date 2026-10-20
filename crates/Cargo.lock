@@ -3726,8 +3726,13 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "anyhow",
+ "hex",
  "kohaku-tornadocash",
  "kohaku-userop-kit",
+ "rand 0.10.2",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -3770,6 +3775,7 @@ dependencies = [
  "alloy",
  "anyhow",
  "hex",
+ "kohaku-fork-kit",
  "kohaku-frame-kit",
  "kohaku-merkle-tree",
  "kohaku-tornadocash",

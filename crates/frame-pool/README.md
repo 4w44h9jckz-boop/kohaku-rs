@@ -32,6 +32,14 @@ withdrawal used 567,821 gas: 5,579 for the EIP-8272 root check, 244,808 plus 97,
 the pool's `VERIFY` (the Groth16 check plus the first use of the nullifier as a nonce key), and
 14,381 plus 183,600 state for the payout.
 
+`tests/local_node.rs` runs the same flow against a local ethrex node from `kohaku-fork-kit`
+(`ETHREX_BIN`; skipped when it is unset). It first deploys the hasher, the patched verifier and
+the keyed pool with the CREATE2 frames `exp-frames` experiment 06 used
+(`tests/fixtures/deployments.json`, printed by that experiment's `export.ts`), so the pool lands
+at its testnet address. Then it deposits and withdraws, and requires every frame of the
+withdrawal to use the status, execution gas and state gas of the block 304501 withdrawal. With
+ethrex at `64b8fc09`, the testnet's commit, it does.
+
 `examples/refund_withdrawal.rs` does the same against `exp-frames` experiment 30's
 `RefundPool`. That pool's last frame sends the recipient the note's fee less an upper bound on
 what the transaction is charged, so without a relayer the note pays about its gas, not its max

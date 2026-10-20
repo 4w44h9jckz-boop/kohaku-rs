@@ -12,29 +12,21 @@
 use std::{env, time::Duration};
 
 use alloy::{
-    primitives::{Address, B256, U256, address, keccak256},
+    primitives::{Address, U256, address, keccak256},
     providers::{Provider, ProviderBuilder},
-    rpc::types::Filter,
     signers::local::PrivateKeySigner,
-    sol_types::{SolCall, SolEvent},
 };
 use anyhow::{Context, bail, ensure};
 use kohaku_frame_kit::{
-    Frame, FrameSigner, FrameTx,
-    constants::approve,
-    json::{FrameTxReceiptJson, LogJson},
+    FrameSigner, FrameTx,
+    json::FrameTxReceiptJson,
     rpc::{self, HEGOTA_RPC_URL},
-    sign_all,
 };
 use kohaku_frame_pool::{
-    prove,
-    withdrawal::{
-        DENOMINATION, FramePool, POOL_FEES, PoolMode, WithdrawalOpts,
-        abi::{Deposit, RecentRoot, depositCall},
-        withdrawal_tx,
-    },
+    chain, prove,
+    withdrawal::{DENOMINATION, FramePool, PoolMode, WithdrawalOpts, withdrawal_tx},
 };
-use kohaku_tornadocash::{Field, Note, Payer};
+use kohaku_tornadocash::{Note, Payer};
 use rand::RngExt;
 
 /// The keyed pool `exp-frames` experiment 06 deployed on the testnet.
@@ -56,74 +48,20 @@ async fn main() -> anyhow::Result<()> {
         salt: keccak256("exp-frames/06/pool-keyed"),
     };
 
-    // 1. Deposit, from an ordinary account signing an ordinary frame transaction.
+    // 1. Deposit, from an ordinary account signing an ordinary frame transaction. The pool
+    //    published its new root to EIP-8272 in the same frame.
     let note: Note = rand::rng().random();
     eprintln!("note 0x{}", hex::encode(note.preimage()));
-    let depositor = FrameSigner::Secp256k1(signer);
-    let from = depositor.address();
-    let commitment = B256::from(note.commitment());
-    let mut tx = FrameTx {
-        chain_id,
-        nonce_keys: vec![U256::ZERO],
-        nonce_seq: rpc::nonce_seq(&provider, from, &[U256::ZERO]).await?,
-        sender: from,
-        frames: vec![
-            Frame::verify(approve::EXECUTION_AND_PAYMENT, None).with_execution(20_000),
-            Frame::sender(Some(pool.address))
-                .with_value(U256::from(DENOMINATION))
-                .with_data(depositCall { commitment }.abi_encode())
-                .with_execution(1_500_000)
-                .with_state(3_000_000),
-        ],
-        signatures: vec![depositor.placeholder(None)],
-        fees: POOL_FEES,
-        blob_versioned_hashes: vec![],
-    };
-    sign_all(&mut tx, &[depositor])?;
-    let deposit = submit(&provider, &tx, "deposit").await?;
-
-    // The pool published its new root to EIP-8272 in the same frame.
-    let logs: Vec<&LogJson> = deposit
-        .frame_receipts
-        .iter()
-        .flat_map(|f| &f.logs)
-        .filter(|l| l.address == pool.address)
-        .collect();
-    let leaf_index = logs
-        .iter()
-        .find(|l| l.topics.first() == Some(&Deposit::SIGNATURE_HASH))
-        .map(|l| U256::from_be_slice(&l.data[..32]).to::<usize>())
-        .context("no Deposit event")?;
-    let (root, slot) = logs
-        .iter()
-        .find(|l| l.topics.first() == Some(&RecentRoot::SIGNATURE_HASH))
-        .map(|l| {
-            let root = B256::from_slice(&l.data[..32]);
-            (root, U256::from_be_slice(&l.data[32..64]).to::<u64>())
-        })
-        .context("no RecentRoot event")?;
-    println!("leaf {leaf_index}, root {root} published in slot {slot}");
+    let deposited =
+        chain::deposit(&provider, &pool, &FrameSigner::Secp256k1(signer), &note).await?;
+    let (leaf_index, root, slot) = (deposited.leaf_index, deposited.root, deposited.slot);
+    println!(
+        "deposit: block {}; leaf {leaf_index}, root {root} published in slot {slot}",
+        deposited.receipt.block_number
+    );
 
     // 2. The tree as it stood after this deposit, from the pool's Deposit events.
-    let events = provider
-        .get_logs(
-            &Filter::new()
-                .address(pool.address)
-                .event_signature(Deposit::SIGNATURE_HASH)
-                .from_block(0),
-        )
-        .await?;
-    let mut leaves = vec![None; leaf_index + 1];
-    for e in &events {
-        let index = U256::from_be_slice(&e.data().data[..32]).to::<usize>();
-        if index <= leaf_index {
-            leaves[index] = Some(Field::try_from(e.topics()[1])?);
-        }
-    }
-    let leaves: Vec<Field> = leaves
-        .into_iter()
-        .collect::<Option<_>>()
-        .context("gap in the Deposit events")?;
+    let leaves = chain::leaves(&provider, pool.address, leaf_index).await?;
 
     // 3. Prove. The pool is the relayer: it pays the gas and keeps the fee.
     let recipient = PrivateKeySigner::random().address();
