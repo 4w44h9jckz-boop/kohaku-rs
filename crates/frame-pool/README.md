@@ -80,7 +80,8 @@ cargo run --release -p kohaku-frame-pool --bin frame-pool -- prove < request.jso
 `chain::keyed_batch` builds several pool-paid withdrawals from one wallet against one root, each
 with its own nullifier hash as its nonce key, and refuses two spends of one note.
 `examples/concurrent_withdrawals.rs` hands such a pair to a mempool node back to back
-(`SEND_RPC_URL`). On 2026-10-20 a skandha node under emem's `hegota-testnet` profile admitted
-both at head 479,760 and handed them to ethrex, and both were mined in block 479,761
+(`SEND_RPC_URL`). On 2026-10-20 a skandha node under the mempool specification's
+`hegota-testnet` profile admitted both at head 479,760 and handed them to ethrex, and both were
+mined in block 479,761
 (`0xe2e65ff9`, `0x5ce6a700`). A second spend of the first note, sent while it was pending, was
 refused as `ErrReplaceUnderpriced` (`exp-frames` experiment 34).
