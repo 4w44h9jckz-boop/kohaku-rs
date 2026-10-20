@@ -10,17 +10,21 @@
 //! withdrawal is priced as experiment 30 priced it ([`chain::priced_withdrawal`], fees
 //! [`chain::WALLET_FEES`]). The note is printed to standard error before the deposit is sent, so
 //! a deposit whose withdrawal fails can still be recovered.
+//!
+//! With `SEND_RPC_URL` set, the withdrawal is handed to that node alone with
+//! `eth_sendRawTransaction`, for example a mempool node that is not the chain's, and the receipt
+//! is awaited from `RPC_URL`. The deposit, the simulation and the reads still go to `RPC_URL`.
 
-use std::env;
+use std::{env, time::Duration};
 
 use alloy::{
-    primitives::{Address, U256, address, keccak256},
+    primitives::{Address, B256, U256, address, keccak256},
     providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
 };
 use anyhow::{Context, ensure};
-use kohaku_frame_kit::{FrameSigner, gas::max_cost, rpc};
+use kohaku_frame_kit::{FrameSigner, FrameTx, gas::max_cost, json::FrameTxReceiptJson, rpc};
 use kohaku_frame_pool::{
     chain::{self, WALLET_FEES},
     withdrawal::{DENOMINATION, FramePool, PoolMode, WithdrawalOpts, abi::FeeRefund},
@@ -96,8 +100,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 3. Withdraw, with the pool as sender and payer.
     let before = provider.get_balance(pool.address).await?;
-    let executed = rpc::execute(&provider, &tx, true).await?;
-    let receipt = executed.receipt;
+    let (hash, receipt) = send(&provider, &tx).await?;
     ensure!(receipt.status == U256::from(1), "the withdrawal reverted");
     ensure!(receipt.payer == pool.address, "the pool did not pay");
     let frames: Vec<String> = receipt
@@ -107,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
         .collect();
     println!(
         "withdrawal: {} in block {}, gasUsed {}, effective price {} wei, frames (status:execution+state) {}",
-        executed.hash,
+        hash,
         receipt.block_number,
         receipt.gas_used,
         receipt.effective_gas_price,
@@ -142,4 +145,34 @@ async fn main() -> anyhow::Result<()> {
         (bound - charged) / receipt.effective_gas_price,
     );
     Ok(())
+}
+
+/// Simulate, then send: to `SEND_RPC_URL` alone when it is set, else to `RPC_URL`. Either way the
+/// receipt is awaited from `RPC_URL` until a block is built on it.
+async fn send<P: Provider>(
+    provider: &P,
+    tx: &FrameTx,
+) -> anyhow::Result<(B256, FrameTxReceiptJson)> {
+    if let Ok(send_url) = env::var("SEND_RPC_URL") {
+        let sim = rpc::simulate(provider, tx, "latest").await?;
+        ensure!(
+            sim.valid && sim.execution_status.as_deref() == Some("success"),
+            "the withdrawal would not succeed: {:?}",
+            sim.violation.or(sim.execution_error)
+        );
+        let first = ProviderBuilder::new().connect_http(send_url.parse()?);
+        let hash = rpc::send(&first, tx).await?;
+        println!("withdrawal: {hash} handed to {send_url} only");
+        let receipt = rpc::wait_for_confirmed_receipt(
+            provider,
+            hash,
+            Duration::from_mins(5),
+            Duration::from_secs(2),
+        )
+        .await?;
+        Ok((hash, receipt))
+    } else {
+        let executed = rpc::execute(provider, tx, true).await?;
+        Ok((executed.hash, executed.receipt))
+    }
 }

@@ -52,7 +52,11 @@ the root check, 244,744 plus 97,920 state for the pool's `VERIFY`, 14,255 plus 1
 the payout, and 11,531 for the refund. At 100,000,007 wei per gas the chain charged
 57,969,704,057,879 wei. The refund frame sent back 91,341,595,847,838, so the note paid
 59,316,604,152,162: 1.023 times its gas, the bound being the refund frame's 13,469 unused gas
-above the charge. The test rebuilds this withdrawal and both of experiment 30's byte for byte,
+above the charge. With `SEND_RPC_URL` set, the withdrawal is handed to that node alone, for example a mempool node
+other than the chain's, while the deposit, the simulation and the receipt still go through
+`RPC_URL`. A run that way on 2026-10-20, with both URLs at the testnet, mined
+[`0x07f534f4...`](https://dora.privacy.ethrex.xyz/tx/0x07f534f4a6b8399b61458119c333465dc08a7a344ec5f3b9a846953569575fbb)
+in block 478011 with the same limits, fee and bound. The test rebuilds the first withdrawal and both of experiment 30's byte for byte,
 and `exp-frames`' `experiments/30-relayer-free-withdrawal/layout.test.ts` rebuilds the same
 three in TypeScript.
 
