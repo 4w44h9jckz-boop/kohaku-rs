@@ -3904,6 +3904,8 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "anyhow",
+ "ark-bn254",
+ "ark-ff 0.6.0",
  "hex",
  "kohaku-frame-accounts",
  "kohaku-frame-kit",
@@ -3911,6 +3913,7 @@ dependencies = [
  "kohaku-tornadocash",
  "kohaku-tornadocash-keychain",
  "rand 0.10.2",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

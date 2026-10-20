@@ -139,6 +139,25 @@ signature and the pool as payer.
 **What it leaves out.** Two shares of two: losing both devices loses the notes, as it loses the
 account. Shamir's scheme, two of three, is the step up, and is not here.
 
+## The crowd behind a statement
+
+A proof reveals nothing beyond its statement, but a statement that fits few people names its
+prover. The `disclosure` module counts, from public chain data, how many notes could make the
+same statement, and words the count before the wallet proves it: under 10 "would all but name
+you", under 100 "narrows you down". It covers three kinds:
+
+- a deposit into a pool before a date (`deposits_before`, a Tornado Cash pool's `nextIndex()`
+  at the last block before it);
+- an unspent note worth at least T (`unspent_at_least`, balance / denomination over the ETH
+  pools of at least T);
+- a deposit in an association set (`AssociationSet::verify` recomputes the provider's published
+  tree with circomlib's Poseidon, ported here, and checks its top against the root on chain).
+
+It cannot count a balance over all accounts: that needs the state's account range, which an
+ordinary RPC does not serve. `examples/disclosure.rs` runs all three on mainnet. At block
+26,231,840 its counts equal `exp-frames` experiment 35's `results.md`, from 2,266 unspent notes
+of at least 100 ETH down to 3 approved Privacy Pools deposits of at least 100 ETH.
+
 ## Tests and runs
 
 `tests/experiment_28.rs` rebuilds the twelve batches `exp-frames` experiment 28 has as fixtures:
