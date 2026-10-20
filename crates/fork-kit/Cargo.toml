@@ -20,9 +20,14 @@ alloy = { workspace = true, features = [
     "signer-local",
 ] }
 anyhow = { workspace = true }
+hex = { workspace = true }
 kohaku-tornadocash = { workspace = true }
+rand = { workspace = true }
 kohaku-userop-kit = { workspace = true }
-tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["process", "rt-multi-thread", "time"] }
 tracing = { workspace = true }
 
 [lints]

@@ -1,0 +1,31 @@
+[package]
+name = "kohaku-frame-registry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes-gcm = { workspace = true }
+alloy = { workspace = true }
+ark-bn254 = { workspace = true }
+ark-ec = { workspace = true }
+ark-ff = { workspace = true }
+hex = { workspace = true }
+hkdf = { workspace = true }
+k256 = { workspace = true, features = ["ecdh"] }
+kohaku-frame-accounts = { workspace = true }
+kohaku-frame-kit = { workspace = true }
+kohaku-frame-pool = { workspace = true }
+kohaku-merkle-tree = { workspace = true }
+kohaku-tornadocash = { workspace = true }
+ruint = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+anyhow = { workspace = true }

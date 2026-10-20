@@ -1,4 +1,7 @@
-//! Transactions mined on the ethrex Hegota testnet by the `exp-frames` experiments.
+//! Transactions mined on the ethrex Hegota testnet by the `exp-frames` experiments, and by this
+//! repository's examples: every Hegota fixture `exp-frames` keeps in `test/fixtures/chain/`,
+//! copied unchanged. Its frames-devnet-0 fixtures are left out, because they use the 7-field
+//! envelope this crate does not speak.
 
 use std::{fs, path::Path};
 
@@ -46,7 +49,7 @@ fn fixtures() -> Vec<(String, Fixture)> {
 
 #[test]
 fn there_are_fixtures() {
-    assert_eq!(fixtures().len(), 55);
+    assert_eq!(fixtures().len(), 238);
 }
 
 #[test]
@@ -65,14 +68,22 @@ fn every_signature_proves_its_signer_over_our_sig_hash() {
         let tx = FrameTx::try_from(&f.tx).unwrap();
         let sig_hash = tx.sig_hash();
         for s in &tx.signatures {
+            // An ARBITRARY entry names no signer and the protocol checks nothing: the account's
+            // own VERIFY reads it (FROST in experiment 07, WebAuthn in 11, WOTS in 17).
+            if s.scheme == scheme::ARBITRARY {
+                assert!(s.signer.is_none(), "{name}");
+                checked[usize::from(s.scheme)] += 1;
+                continue;
+            }
             let who = signer_of(s, sig_hash).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(who, s.signer.unwrap_or(tx.sender), "{name}");
             checked[usize::from(s.scheme)] += 1;
         }
     }
-    // Both schemes are represented, so neither path is vacuous.
+    // Both protocol schemes are represented, so neither path is vacuous.
     assert!(checked[usize::from(scheme::SECP256K1)] > 0);
     assert!(checked[usize::from(scheme::P256)] > 0);
+    assert!(checked[usize::from(scheme::ARBITRARY)] > 0);
 }
 
 #[test]

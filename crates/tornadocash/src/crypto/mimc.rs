@@ -20,6 +20,14 @@ pub fn mimc_sponge_hash(left: Fr, right: Fr) -> Fr {
     multi_hash(&[left, right], Fr::ZERO, 1)[0]
 }
 
+/// circomlib's `MiMCSponge(n, 220, 1)` with key 0, over any number of inputs: the tree's hash
+/// for two, and the hash of any circuit built on circomlib's sponge.
+#[must_use]
+pub fn mimc_sponge(inputs: &[crate::Field]) -> crate::Field {
+    let arr: Vec<Fr> = inputs.iter().map(|&f| f.into()).collect();
+    multi_hash(&arr, Fr::ZERO, 1)[0].into()
+}
+
 fn pow5(t: Fr) -> Fr {
     let t2 = t.square();
     t2.square() * t
@@ -78,5 +86,14 @@ mod tests {
         let expected =
             "19959340151377300313091727919972631675102727336775656950865944133482941692341";
         assert_eq!(hash.to_string(), expected);
+    }
+
+    #[test]
+    fn sponge_of_two_is_the_tree_hash() {
+        let (a, b) = (Fr::from(100), Fr::from(200));
+        assert_eq!(
+            Fr::from(mimc_sponge(&[a.into(), b.into()])),
+            mimc_sponge_hash(a, b)
+        );
     }
 }

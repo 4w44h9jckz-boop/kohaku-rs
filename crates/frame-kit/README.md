@@ -18,10 +18,12 @@ transaction here.
   has been built on the receipt's block (`wait_for_confirmed_receipt`): ethrex can serve a receipt
   from a block it then replaces.
 
-The tests are offline. They re-encode 55 transactions mined on the testnet, by the `exp-frames`
+The tests are offline. They re-encode 238 transactions mined on the testnet, by the `exp-frames`
 experiments and by the `kohaku-frame-pool` and `kohaku-frame-accounts` examples
-(`tests/fixtures/chain/`), to their on-chain hashes; check every secp256k1 and P256 signature
-over the signature hash computed here; settle each one to its receipt's `gasUsed`; and match the
+(`tests/fixtures/chain/`: every Hegota fixture `exp-frames` keeps, copied unchanged), to their
+on-chain hashes; check every secp256k1 and P256 signature over the signature hash computed here,
+and that every `ARBITRARY` entry names no signer, since the account's own `VERIFY` checks it;
+settle each one to its receipt's `gasUsed`; and match the
 golden vector in ethrex's `scripts/hegota-testnet/frametx.py`. `tests/mempool.rs` checks the
 replacement rule and the receipt rule, both from `exp-frames` experiment 19, against a mocked
 node. `tests/execution_digest.rs` computes experiment 27's ten vectors through alloy's EIP-712

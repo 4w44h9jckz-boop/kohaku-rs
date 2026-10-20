@@ -56,6 +56,14 @@ pub fn session_account_code() -> Vec<u8> {
     code(include_str!("../contracts/SessionAccount.hex"))
 }
 
+/// `DeviceRecoveryAccount.yul` (`exp-frames` experiment 31): an owner the owner's own devices can
+/// replace after a delay. Initcode: code `||` owner `||` device commitment `||` delay `||` lower
+/// bound, as 32-byte words.
+#[must_use]
+pub fn device_recovery_account_code() -> Vec<u8> {
+    code(include_str!("../contracts/DeviceRecoveryAccount.hex"))
+}
+
 /// `CanonicalPaymaster.yul`: an instance of the EIP-8141 canonical paymaster, ethereum/EIPs#12041
 /// as ethrex pins it. Initcode: code `||` signer, as a 32-byte word. The constructor writes the
 /// signer to slot 0 and returns the PR's 355-byte runtime verbatim.
