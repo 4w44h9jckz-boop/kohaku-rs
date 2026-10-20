@@ -7,15 +7,23 @@
 //! The users' keys are not here, so a rebuild must reach the mined signature hash; with the
 //! mined signature put back it must then be the mined transaction, byte for byte.
 //!
+//! `exp-frames` experiment 38's descriptors, from `kohaku-frame-display`'s fixtures, show each
+//! batch as the device would.
+//!
 //! `binding-0x9688c1f8.json` is experiment 28's own `frameTxToRpc` applied to case C's fixture,
 //! printed by `frameTxFromJson` and `frameTxToRpc` from `exp-frames` at `1d709ad`.
 
 use std::{fs, path::Path};
 
-use alloy::primitives::U256;
+use alloy::primitives::{Address, U256};
 use kohaku_frame_accounts::{
     account::{Eoa, Signer},
     builder::Envelope,
+};
+use kohaku_frame_display::{
+    Registry, Rules,
+    format::{self, Container},
+    render,
 };
 use kohaku_frame_kit::{
     FrameTx,
@@ -139,6 +147,43 @@ fn derives_the_status_experiment_28_reported() {
             .iter()
             .any(|f| f.status != U256::from(1));
         assert_eq!(receipt.status == U256::ZERO, any_failed, "{name}");
+    }
+}
+
+/// What ERC-7730 shows for one EIP-5792 call, in its EVM transaction container.
+fn call_intent(registry: &Registry, chain_id: u64, from: Address, call: &Call) -> String {
+    let to = call.to.unwrap();
+    let d = registry.contract(chain_id, to).unwrap();
+    let data = call.data.clone().unwrap_or_default();
+    let (fmt, values) = d.select(&data).unwrap().unwrap();
+    let container = Container {
+        chain_id,
+        from,
+        to,
+        value: call.value.unwrap_or_default(),
+    };
+    format::apply(fmt, &values, container, &d.metadata, registry)
+        .unwrap()
+        .intent
+}
+
+#[test]
+fn shows_each_batch_as_erc_7730_shows_its_calls() {
+    let registry = Registry::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../frame-display/tests/fixtures/descriptors"),
+    )
+    .unwrap();
+    for (name, mined, _) in fixtures() {
+        let (calls, _) = calls_of(&mined);
+        let review = render(&mined, 0, &registry, Rules::HEGOTA_TESTNET).unwrap();
+        // ERC-7730 joins a batch's intents with " and "; each SENDER frame is its call, in an EVM
+        // transaction container from the sender.
+        let joined: Vec<String> = calls
+            .iter()
+            .map(|c| call_intent(&registry, mined.chain_id, mined.sender, c))
+            .collect();
+        assert_eq!(review.intent, joined.join(" and "), "{name}");
+        assert!(review.gaps.is_empty(), "{name}: {:?}", review.gaps);
     }
 }
 

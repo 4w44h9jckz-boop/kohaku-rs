@@ -1,0 +1,12 @@
+{
+  "$schema": "../format.md#deployer-descriptors",
+  "context": {
+    "$id": "CREATE2 deployer",
+    "deployer": {
+      "deployments": [{ "chainId": 8141, "address": "0x4e59b44847b379578588920ca78fbf26c0b4956c" }],
+      "calldata": "salt (bytes32) || initcode",
+      "address": "create2"
+    }
+  },
+  "metadata": { "owner": "Arachnid", "contractName": "Deterministic deployment proxy" }
+}

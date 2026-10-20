@@ -1,0 +1,29 @@
+{
+  "$schema": "https://eips.ethereum.org/assets/eip-7730/erc7730-v2.schema.json",
+  "context": {
+    "$id": "ToyDex",
+    "contract": {
+      "deployments": [{ "chainId": 8141, "address": "0x773df329eB6E70A52A4adE970D0C34B17cA367f7" }]
+    }
+  },
+  "metadata": {
+    "owner": "exp-frames",
+    "contractName": "ToyDex",
+    "constants": {
+      "tokenIn": "0x8C2c146c8C13c4436B20d7880C07fbeEae304B2a",
+      "tokenOut": "0x7f6B1f38F2AE6B5683CDfFED8EF35Bca3349Cc69"
+    }
+  },
+  "display": {
+    "formats": {
+      "swap(uint256 amountIn,uint256 minOut)": {
+        "intent": "Swap",
+        "interpolatedIntent": "Swap {amountIn} for at least {minOut}",
+        "fields": [
+          { "path": "amountIn", "label": "Send", "format": "tokenAmount", "params": { "token": "$.metadata.constants.tokenIn" } },
+          { "path": "minOut", "label": "Receive at least", "format": "tokenAmount", "params": { "token": "$.metadata.constants.tokenOut" } }
+        ]
+      }
+    }
+  }
+}

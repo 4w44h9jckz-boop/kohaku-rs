@@ -2,6 +2,7 @@
 members = [
     "fork-kit",
     "frame-accounts",
+    "frame-display",
     "frame-kit",
     "frame-pool",
     "frame-registry",
@@ -50,6 +51,7 @@ insta = "1.48.0"
 k256 = "0.13.4"
 kohaku-fork-kit = { path = "fork-kit" }
 kohaku-frame-accounts = { path = "frame-accounts" }
+kohaku-frame-display = { path = "frame-display" }
 kohaku-frame-kit = { path = "frame-kit" }
 kohaku-frame-pool = { path = "frame-pool" }
 kohaku-frame-registry = { path = "frame-registry" }
