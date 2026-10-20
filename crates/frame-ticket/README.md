@@ -79,5 +79,10 @@ order shuffled away from the order of issuance, and two at once. It then sends t
 transactions the paymaster must refuse. The record holds every transaction, the issuers'
 transcripts and the committee's public keys; no private key and no blinding factor.
 
+`tests/record.rs` reads the run's record back (`tests/fixtures/record.json`, copied from the
+experiment): the deployed initcode is this crate's code with the committee's key, every mined
+spend is rebuilt byte for byte by the builder and its ticket verifies, and every issuer's answer
+checks against its share's key.
+
 The crate is left out of CI's `wasm32-unknown-unknown` check: `blst` compiles C, and for that
 target it needs clang, which CI's nix shell does not provide.
