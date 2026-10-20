@@ -4,6 +4,7 @@ members = [
     "frame-accounts",
     "frame-kit",
     "frame-pool",
+    "frame-wallet",
     "merkle-tree",
     "tornadocash",
     "tornadocash-circuit",
@@ -37,6 +38,7 @@ kohaku-fork-kit = { path = "fork-kit" }
 kohaku-frame-accounts = { path = "frame-accounts" }
 kohaku-frame-kit = { path = "frame-kit" }
 kohaku-frame-pool = { path = "frame-pool" }
+kohaku-frame-wallet = { path = "frame-wallet" }
 kohaku-merkle-tree = { path = "merkle-tree" }
 kohaku-tornadocash = { path = "tornadocash" }
 kohaku-tornadocash-circuit = { path = "tornadocash-circuit" }

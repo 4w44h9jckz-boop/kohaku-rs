@@ -1,0 +1,63 @@
+{
+  "chainId": "0x1fcd",
+  "nonceKeys": [
+    "0x0"
+  ],
+  "nonceSeq": "0x1",
+  "sender": "0x83D00Dd052eb3a8181E4C08C7E8062645A7Bc098",
+  "frames": [
+    {
+      "mode": "0x1",
+      "flags": "0x2",
+      "target": null,
+      "executionGasLimit": "0x4e20",
+      "stateGasLimit": "0x0",
+      "value": "0x0",
+      "data": "0x"
+    },
+    {
+      "mode": "0x1",
+      "flags": "0x1",
+      "target": "0xC925Ee6cb70CFd7B97bBb93B5b070C185e43159E",
+      "executionGasLimit": "0x3a98",
+      "stateGasLimit": "0x0",
+      "value": "0x0",
+      "data": "0x"
+    },
+    {
+      "mode": "0x2",
+      "flags": "0x4",
+      "target": "0x8C2c146c8C13c4436B20d7880C07fbeEae304B2a",
+      "executionGasLimit": "0x6912",
+      "stateGasLimit": "0x5ca30",
+      "value": "0x0",
+      "data": "0x095ea7b3000000000000000000000000773df329eb6e70a52a4ade970d0c34b17ca367f70000000000000000000000000000000000000000000000000de0b6b3a7640000"
+    },
+    {
+      "mode": "0x2",
+      "flags": "0x0",
+      "target": "0x773df329eB6E70A52A4adE970D0C34B17cA367f7",
+      "executionGasLimit": "0x14d85",
+      "stateGasLimit": "0x5ca30",
+      "value": "0x0",
+      "data": "0xd96073cf0000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000de0b6b3a7640000"
+    }
+  ],
+  "signatures": [
+    {
+      "scheme": "0x1",
+      "signer": null,
+      "msg": "0x",
+      "signature": "0x0000b963987c7f27f467597efa1f24006c36a9c43a04f623f315ac8e45705074603a1fd5bea4f5f9db70bdf69049c635e32a4ea56baa779579a5315e2aa56b0d64"
+    },
+    {
+      "scheme": "0x1",
+      "signer": "0x9D29Ff745f5306ccd52A066D11Ce0F964B3d13E6",
+      "msg": "0x",
+      "signature": "0x015b1e118f118230a0e8fe04a41f143d67f9eb5ddf99a7be82e72684766767b0e60594b65c3e2345170ea29ee049a8affa5025a2f6cbb2f8b7d88ba204330ad3fa"
+    }
+  ],
+  "maxPriorityFeePerGas": "0x3b9aca00",
+  "maxFeePerGas": "0x3b9aca0e",
+  "maxFeePerBlobGas": "0x0"
+}

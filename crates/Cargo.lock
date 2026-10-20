@@ -3788,6 +3788,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "kohaku-frame-wallet"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "hex",
+ "kohaku-frame-accounts",
+ "kohaku-frame-kit",
+ "rand 0.10.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "kohaku-merkle-tree"
 version = "0.1.0"
 dependencies = [
