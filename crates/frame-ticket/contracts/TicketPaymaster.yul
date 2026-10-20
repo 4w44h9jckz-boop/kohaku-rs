@@ -56,21 +56,21 @@ object "TicketPaymaster" {
                 if iszero(eq(calldatasize(), 168)) { fail() }
                 if gt(txparam(0x06), denomination()) { fail() }
 
-                // msg_prime = Z_pad (64) || union_unique(NAMESPACE, message) (149)
+                // msg_prime = Z_pad (64) || union_unique(NAMESPACE, message) (148)
                 //             || I2OSP(128, 2) || I2OSP(0, 1) || DST_prime (44), at 0x200.
                 calldatacopy(0x200, calldatasize(), 64)                 // Z_pad: zeros
-                mstore(0x240, shl(248, 16))                             // varint(len(NAMESPACE))
+                mstore(0x240, shl(248, 15))                             // varint(len(NAMESPACE))
                 mstore(0x241, NAMESPACE())
-                mstore(0x251, chainid())
-                mstore(0x271, shl(96, txparam(0x02)))                   // sender
-                mstore(0x285, txparam(0x0f))                            // nonce_keys_hash
-                mstore(0x2a5, shl(192, txparam(0x01)))                  // nonce_seq
-                calldatacopy(0x2ad, 0, 40)                              // epoch, salt
-                mstore(0x2d5, shl(240, 0x0080))                         // len_in_bytes = 128
-                mstore8(0x2d7, 0)
-                mstore(0x2d8, DST1())
-                mstore(0x2f8, DST2())
-                sha256(0x200, 0x104, 0x100)                             // b_0
+                mstore(0x250, chainid())
+                mstore(0x270, shl(96, txparam(0x02)))                   // sender
+                mstore(0x284, txparam(0x0f))                            // nonce_keys_hash
+                mstore(0x2a4, shl(192, txparam(0x01)))                  // nonce_seq
+                calldatacopy(0x2ac, 0, 40)                              // epoch, salt
+                mstore(0x2d4, shl(240, 0x0080))                         // len_in_bytes = 128
+                mstore8(0x2d6, 0)
+                mstore(0x2d7, DST1())
+                mstore(0x2f7, DST2())
+                sha256(0x200, 0x103, 0x100)                             // b_0
                 let b0 := mload(0x100)
 
                 // b_i = H(strxor(b_0, b_{i-1}) || I2OSP(i, 1) || DST_prime), uniform at 0x400.
@@ -125,8 +125,8 @@ object "TicketPaymaster" {
                 d := mload(0)
             }
             function fail() { revert(0, 0) }
-            // "kohaku-ticket-v1", left-aligned.
-            function NAMESPACE() -> v { v := 0x6b6f68616b752d7469636b65742d763100000000000000000000000000000000 }
+            // "FRAME_TICKET_V1", left-aligned.
+            function NAMESPACE() -> v { v := 0x4652414d455f5449434b45545f56310000000000000000000000000000000000 }
             // "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_" || I2OSP(43, 1), left-aligned.
             function DST1() -> v { v := 0x424c535f5349475f424c53313233383147315f584d443a5348412d3235365f53 }
             function DST2() -> v { v := 0x5357555f524f5f504f505f2b0000000000000000000000000000000000000000 }

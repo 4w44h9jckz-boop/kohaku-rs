@@ -27,8 +27,9 @@ use kohaku_frame_kit::{FrameTx, digest::nonce_keys_hash};
 
 use crate::blind;
 
-/// The namespace the issuers sign tickets under.
-pub const NAMESPACE: &[u8] = b"kohaku-ticket-v1";
+/// The namespace the issuers sign tickets under, as a mempool that checks tickets before admission
+/// checks them (the mempool session's claim-gated admission takes this layout with this name).
+pub const NAMESPACE: &[u8] = b"FRAME_TICKET_V1";
 
 /// Seconds an epoch lasts: the epoch of a block is its timestamp divided by this.
 pub const EPOCH_SECONDS: u64 = 384;
