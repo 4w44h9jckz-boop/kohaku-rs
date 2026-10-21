@@ -57,6 +57,16 @@ pub fn blind(rng: &mut impl CryptoRng, namespace: &[u8], message: &[u8]) -> (G1,
     (hash(namespace, message) * &r, Blinding { r })
 }
 
+/// Blind a message with a factor the caller chose, for a wallet that derives it from its seed
+/// and must make the same request again after a loss. `None` if `r` is zero.
+#[must_use]
+pub fn blind_with(r: Scalar, namespace: &[u8], message: &[u8]) -> Option<(G1, Blinding)> {
+    if r == Scalar::zero() {
+        return None;
+    }
+    Some((hash(namespace, message) * &r, Blinding { r }))
+}
+
 /// An issuer's answer to a blinded point: the point times its share.
 #[must_use]
 pub fn answer(share: &Share, blinded: &G1) -> PartialSignature<MinSig> {
