@@ -1,0 +1,32 @@
+[package]
+name = "kohaku-witness-share"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+bincode = "1.3"
+circom-types = { package = "taceo-circom-types", version = "0.3.1" }
+# TACEO's co-snarks at the commit the committee's share format names (exp-e2e-frames c8eb5cc)
+co-circom-types = { git = "https://github.com/TaceoLabs/co-snarks", rev = "436f63fa17f2f10ece38c6650df68da99fbc0307" }
+mpc-core = { git = "https://github.com/TaceoLabs/co-snarks", rev = "436f63fa17f2f10ece38c6650df68da99fbc0307" }
+kohaku-tornadocash-circuit = { workspace = true }
+rand08 = { package = "rand", version = "0.8" }
+ruint = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+alloy = { workspace = true }
+hex = { workspace = true }
+kohaku-frame-kit = { workspace = true }
+kohaku-frame-pool = { workspace = true }
+kohaku-tornadocash = { workspace = true }
+rand = { workspace = true }
+rand08 = { package = "rand", version = "0.8" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

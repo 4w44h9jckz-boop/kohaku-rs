@@ -146,6 +146,38 @@ pub async fn leaves<P: Provider>(
         .ok_or(ChainError::Missing("gap in the Deposit events"))
 }
 
+/// The fee that covers a pool-paid withdrawal to `recipient` in the worst case, at the limits in
+/// `opts` (the pool's defaults when they are `None`). The shape alone sets it: the fee and the
+/// proof's bytes do not change a worst-case price, so it needs no proof.
+///
+/// [`priced_withdrawal`] proves a draft at this fee with the default limits, simulates it, and
+/// tightens the limits. A wallet that does not prove for itself, and hands the witness to a
+/// committee instead, has no draft to simulate, and pays this fee at the default limits; a refund
+/// pool returns what the gas did not use.
+///
+/// # Errors
+/// Returns an error if the shape cannot be built or priced.
+pub fn worst_case_fee(
+    pool: &FramePool,
+    recipient: Address,
+    opts: &WithdrawalOpts,
+) -> Result<U256, ChainError> {
+    let inputs = PublicInputs {
+        root: B256::ZERO,
+        nullifier_hash: B256::ZERO,
+        recipient,
+        relayer: pool.address,
+        fee: U256::MAX,
+        refund: U256::ZERO,
+    };
+    let opts = WithdrawalOpts {
+        sponsor: None,
+        ..opts.clone()
+    };
+    let shape = withdrawal_tx(pool, &inputs, &Bytes::from(vec![0; 256]), &opts)?;
+    Ok(worst_case_max_cost(&shape)?)
+}
+
 /// A pool-paid withdrawal of `note` to `recipient`, with its limits and its fee set the way
 /// `exp-frames` experiment 30 set them:
 ///
@@ -173,23 +205,15 @@ pub async fn priced_withdrawal<P: Provider>(
         };
         prove(note.clone(), leaves, recipient, payer, rng)
     };
-    // The shape alone: the fee and the proof's bytes do not change a worst-case price.
-    let worst = |limits: Option<Vec<u64>>| -> Result<U256, ChainError> {
-        let inputs = PublicInputs {
-            root: B256::ZERO,
-            nullifier_hash: B256::ZERO,
+    let worst = |limits: Option<Vec<u64>>| {
+        worst_case_fee(
+            pool,
             recipient,
-            relayer: pool.address,
-            fee: U256::MAX,
-            refund: U256::ZERO,
-        };
-        let opts = WithdrawalOpts {
-            sponsor: None,
-            execution_limits: limits,
-            ..opts.clone()
-        };
-        let shape = withdrawal_tx(pool, &inputs, &Bytes::from(vec![0; 256]), &opts)?;
-        Ok(worst_case_max_cost(&shape)?)
+            &WithdrawalOpts {
+                execution_limits: limits,
+                ..opts.clone()
+            },
+        )
     };
     let defaults = WithdrawalOpts {
         sponsor: None,

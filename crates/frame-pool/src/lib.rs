@@ -7,7 +7,7 @@ use alloy::primitives::{Address, B256, Bytes, U256};
 use kohaku_merkle_tree::hasher::Hasher;
 use kohaku_tornadocash::{
     Asset, Field, Note, Payer, Pool, Withdrawal, WithdrawalError,
-    merkle_tree::{MerkleTree, TornadoHasher},
+    merkle_tree::{MerkleProof, MerkleTree, TornadoHasher},
 };
 use rand::CryptoRng;
 use serde::{Deserialize, Serialize};
@@ -78,25 +78,8 @@ pub fn prove(
     rng: &mut impl CryptoRng,
 ) -> Result<FramePoolProof, FramePoolError> {
     let commitment = note.commitment();
-    let leaf_index = leaves
-        .iter()
-        .position(|l| *l == commitment)
-        .ok_or(FramePoolError::MissingLeaf)?;
-    let tree = MerkleTree::from_leaves(leaves)?;
-    let merkle_proof = tree.proof(leaf_index)?;
-
-    // `Withdrawal` only carries the pool for its address; nothing here reads it.
-    let pool = Pool {
-        chain_id: 0,
-        address: Address::ZERO,
-        asset: Asset::ETH,
-        amount_wei: 0,
-        deployed_block: 0,
-        paymaster: None,
-    };
-    let proven = Withdrawal::new(&pool, note, recipient)
-        .with_payer(payer)
-        .prove(&merkle_proof, rng)?;
+    let (leaf_index, merkle_proof) = merkle_proof(&note, leaves)?;
+    let proven = withdrawal(note, recipient, payer).prove(&merkle_proof, rng)?;
 
     Ok(FramePoolProof {
         leaf_index,
@@ -111,6 +94,62 @@ pub fn prove(
         },
         proof: proven.proof_bytes(),
     })
+}
+
+/// The circuit's inputs for spending `note` from a pool whose tree holds `leaves`, bound to
+/// `recipient`, `relayer` and `fee` exactly as [`prove`] binds them, without proving: for a wallet
+/// that hands the witness to a proving committee in shares. Returns the note's leaf index and
+/// public inputs with them.
+///
+/// # Errors
+/// Returns an error if the note's commitment is not among `leaves`.
+pub fn circuit_inputs(
+    note: Note,
+    leaves: &[Field],
+    recipient: Address,
+    payer: Payer,
+) -> Result<
+    (
+        usize,
+        PublicInputs,
+        kohaku_tornadocash_circuit::CircuitInputs,
+    ),
+    FramePoolError,
+> {
+    let (leaf_index, merkle_proof) = merkle_proof(&note, leaves)?;
+    let public = PublicInputs {
+        root: merkle_proof.root.into(),
+        nullifier_hash: note.nullifier_hash().into(),
+        recipient,
+        relayer: payer.address,
+        fee: payer.fee,
+        refund: payer.refund,
+    };
+    let inputs = withdrawal(note, recipient, payer).circuit_inputs(&merkle_proof)?;
+    Ok((leaf_index, public, inputs))
+}
+
+fn merkle_proof(note: &Note, leaves: &[Field]) -> Result<(usize, MerkleProof), FramePoolError> {
+    let commitment = note.commitment();
+    let leaf_index = leaves
+        .iter()
+        .position(|l| *l == commitment)
+        .ok_or(FramePoolError::MissingLeaf)?;
+    let tree = MerkleTree::from_leaves(leaves)?;
+    Ok((leaf_index, tree.proof(leaf_index)?))
+}
+
+fn withdrawal(note: Note, recipient: Address, payer: Payer) -> Withdrawal {
+    // `Withdrawal` only carries the pool for its address; nothing here reads it.
+    let pool = Pool {
+        chain_id: 0,
+        address: Address::ZERO,
+        asset: Asset::ETH,
+        amount_wei: 0,
+        deployed_block: 0,
+        paymaster: None,
+    };
+    Withdrawal::new(&pool, note, recipient).with_payer(payer)
 }
 
 #[cfg(test)]

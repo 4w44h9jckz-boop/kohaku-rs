@@ -15,6 +15,7 @@ members = [
     "tornadocash-circuit",
     "tornadocash-keychain",
     "userop-kit",
+    "witness-share",
 ]
 resolver = "3"
 
