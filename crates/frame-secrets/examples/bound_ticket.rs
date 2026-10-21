@@ -19,6 +19,12 @@
 //!    key's signature kept; the same with that entry removed; and the same re-signed by another
 //!    key named in the frame's data. Each must be refused; the original must be mined.
 //!
+//! With `SEND_RPC_URL` set, steps 3 to 5 send there (a mempool node, such as skandha): the fresh
+//! senders' spends, both withdrawals and every copy. Setup, every read and every receipt stay on
+//! `RPC_URL`, and the record names the URL each of those transactions was sent to, with the
+//! node's answer to each one word for word. Without it, nothing changes: every transaction goes
+//! to `RPC_URL` as before.
+//!
 //! The record keeps every transaction, what the issuers saw, and the template's length and
 //! keccak256. No key, mnemonic or blinding factor.
 
@@ -180,10 +186,50 @@ async fn withdrawal<P: Provider>(
     Ok(Withdrawal { tx })
 }
 
-/// Simulate, then send: the node's two answers to a transaction.
-async fn try_send<P: Provider>(provider: &P, tx: &FrameTx, what: &str) -> anyhow::Result<Value> {
+/// Where steps 3 to 5 send: `RPC_URL`, or `SEND_RPC_URL` when it is set. Reads and receipts
+/// always go to `RPC_URL`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Route {
+    rpc_url: String,
+    send_rpc_url: Option<String>,
+}
+
+impl Route {
+    fn new(rpc_url: String, send_rpc_url: Option<String>) -> Self {
+        Self {
+            rpc_url,
+            send_rpc_url: send_rpc_url.filter(|u| !u.is_empty()),
+        }
+    }
+
+    /// The URL steps 3 to 5 send to.
+    fn send_url(&self) -> &str {
+        self.send_rpc_url.as_deref().unwrap_or(&self.rpc_url)
+    }
+
+    /// Whether sending is split from reading; without it, the run is experiment 48's.
+    fn split(&self) -> bool {
+        self.send_rpc_url.is_some()
+    }
+
+    /// The record's note of where a transaction was sent, only when sending is split.
+    fn mark(&self, v: &mut Value) {
+        if self.split() {
+            v["sentTo"] = json!(self.send_url());
+        }
+    }
+}
+
+/// Simulate on `provider`, then send to `mempool`: the two answers to a transaction.
+async fn try_send<P: Provider>(
+    provider: &P,
+    mempool: &P,
+    route: &Route,
+    tx: &FrameTx,
+    what: &str,
+) -> anyhow::Result<Value> {
     let simulated = rpc::simulate(provider, tx, "latest").await?;
-    let sent = match rpc::send(provider, tx).await {
+    let sent = match rpc::send(mempool, tx).await {
         Ok(hash) => json!({ "result": hash }),
         Err(e) => json!({ "error": e.to_string() }),
     };
@@ -191,13 +237,42 @@ async fn try_send<P: Provider>(provider: &P, tx: &FrameTx, what: &str) -> anyhow
         "{what}: simulation valid {}, {:?}; sent: {sent}",
         simulated.valid, simulated.violation
     );
-    Ok(json!({
+    let mut v = json!({
         "what": what,
         "hash": tx.hash(),
         "raw": tx.encode(),
         "simulation": { "valid": simulated.valid, "violation": simulated.violation },
         "sent": sent,
-    }))
+    });
+    route.mark(&mut v);
+    Ok(v)
+}
+
+/// A spend sent and confirmed. Unsplit, it is `common::executed`, as experiment 48 ran it;
+/// split, it is simulated and awaited on `provider` and sent to `mempool`.
+async fn spent<P: Provider>(
+    provider: &P,
+    mempool: &P,
+    route: &Route,
+    tx: &FrameTx,
+    what: &str,
+) -> anyhow::Result<Value> {
+    if !route.split() {
+        return executed(provider, tx, what).await;
+    }
+    let simulated = rpc::simulate(provider, tx, "latest").await?;
+    ensure!(
+        simulated.valid,
+        "{what}: {}",
+        simulated.violation.clone().unwrap_or_default()
+    );
+    let sent = rpc::send(mempool, tx).await;
+    let mut v = match sent {
+        Ok(_) => mined(provider, tx, what).await?,
+        Err(e) => anyhow::bail!("{what}: refused by {}: {e}", route.send_url()),
+    };
+    route.mark(&mut v);
+    Ok(v)
 }
 
 async fn mined<P: Provider>(provider: &P, tx: &FrameTx, what: &str) -> anyhow::Result<Value> {
@@ -232,7 +307,9 @@ async fn mined<P: Provider>(provider: &P, tx: &FrameTx, what: &str) -> anyhow::R
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let url = env::var("RPC_URL").unwrap_or_else(|_| rpc::HEGOTA_RPC_URL.to_owned());
+    let route = Route::new(url.clone(), env::var("SEND_RPC_URL").ok());
     let provider = ProviderBuilder::new().connect_http(url.parse()?);
+    let mempool = ProviderBuilder::new().connect_http(route.send_url().parse()?);
     let funder: PrivateKeySigner = env::var("PRIVATE_KEY").context("PRIVATE_KEY")?.parse()?;
     let seed: Seed = load_seed()?;
     let chain_id = provider.get_chain_id().await?;
@@ -405,7 +482,16 @@ async fn main() -> anyhow::Result<()> {
             .call(post(UNBOUND_TAG))
             .build(&envelope(sender.address()))?;
         sign_all(&mut tx, &[FrameSigner::Secp256k1(sender)])?;
-        spends.push(executed(&provider, &tx, "a fresh sender, unbound ticket").await?);
+        spends.push(
+            spent(
+                &provider,
+                &mempool,
+                &route,
+                &tx,
+                "a fresh sender, unbound ticket",
+            )
+            .await?,
+        );
     }
     {
         let sender = seed.ticket(K_FRESH_BOUND)?.sender;
@@ -423,7 +509,16 @@ async fn main() -> anyhow::Result<()> {
                 FrameSigner::Secp256k1(binder),
             ],
         )?;
-        spends.push(executed(&provider, &tx, "a fresh sender, bound ticket").await?);
+        spends.push(
+            spent(
+                &provider,
+                &mempool,
+                &route,
+                &tx,
+                "a fresh sender, bound ticket",
+            )
+            .await?,
+        );
     }
 
     // 4. The unbound control: a pending withdrawal, and a copy with raised fees.
@@ -446,10 +541,21 @@ async fn main() -> anyhow::Result<()> {
         .await?;
         let mut copy = w.tx.clone();
         copy.fees = copy.fees.bumped();
-        control.push(try_send(&provider, &w.tx, "unbound: the withdrawal").await?);
         control.push(
             try_send(
                 &provider,
+                &mempool,
+                &route,
+                &w.tx,
+                "unbound: the withdrawal",
+            )
+            .await?,
+        );
+        control.push(
+            try_send(
+                &provider,
+                &mempool,
+                &route,
                 &copy,
                 "unbound: a copy with its fees raised, signed by no one",
             )
@@ -497,10 +603,12 @@ async fn main() -> anyhow::Result<()> {
         c3.frames[2].data = Bytes::from(data);
         c3.signatures = vec![binder_entry(other.address())];
         sign_all(&mut c3, &[FrameSigner::Secp256k1(other)])?;
-        binding.push(try_send(&provider, &tx, "bound: the withdrawal").await?);
+        binding.push(try_send(&provider, &mempool, &route, &tx, "bound: the withdrawal").await?);
         binding.push(
             try_send(
                 &provider,
+                &mempool,
+                &route,
                 &c1,
                 "bound: a copy with its fees raised, the one-time key's signature kept",
             )
@@ -509,6 +617,8 @@ async fn main() -> anyhow::Result<()> {
         binding.push(
             try_send(
                 &provider,
+                &mempool,
+                &route,
                 &c2,
                 "bound: the same, its signature entry removed",
             )
@@ -517,6 +627,8 @@ async fn main() -> anyhow::Result<()> {
         binding.push(
             try_send(
                 &provider,
+                &mempool,
+                &route,
                 &c3,
                 "bound: the same, another key named in the frame's data and signing",
             )
@@ -545,7 +657,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     if let Ok(path) = env::var("RECORD") {
-        let record = json!({
+        let mut record = json!({
             "chainId": chain_id,
             "owner0": owner.address(),
             "epoch": epoch,
@@ -567,6 +679,9 @@ async fn main() -> anyhow::Result<()> {
             "control": control,
             "binding": binding,
         });
+        if route.split() {
+            record["sendRpcUrl"] = json!(route.send_url());
+        }
         fs::write(
             &path,
             format!("{}\n", serde_json::to_string_pretty(&record)?),
@@ -574,4 +689,34 @@ async fn main() -> anyhow::Result<()> {
         println!("recorded in {path}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_send_rpc_url_every_send_goes_to_rpc_url_unmarked() {
+        for unset in [None, Some(String::new())] {
+            let r = Route::new("https://rpc.example".into(), unset);
+            assert!(!r.split());
+            assert_eq!(r.send_url(), "https://rpc.example");
+            let mut v = json!({ "hash": "0x01" });
+            r.mark(&mut v);
+            assert_eq!(v, json!({ "hash": "0x01" }), "experiment 48's record shape");
+        }
+    }
+
+    #[test]
+    fn with_send_rpc_url_sends_go_there_and_are_marked() {
+        let r = Route::new(
+            "https://rpc.example".into(),
+            Some("http://127.0.0.1:14337/rpc/".into()),
+        );
+        assert!(r.split());
+        assert_eq!(r.send_url(), "http://127.0.0.1:14337/rpc/");
+        let mut v = json!({});
+        r.mark(&mut v);
+        assert_eq!(v["sentTo"], "http://127.0.0.1:14337/rpc/");
+    }
 }
