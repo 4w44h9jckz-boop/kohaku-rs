@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "checked-read",
     "fork-kit",
     "frame-accounts",
     "frame-display",
@@ -49,6 +50,7 @@ hkdf = "0.12.4"
 hex = "0.4.3"
 insta = "1.48.0"
 k256 = "0.13.4"
+kohaku-checked-read = { path = "checked-read" }
 kohaku-fork-kit = { path = "fork-kit" }
 kohaku-frame-accounts = { path = "frame-accounts" }
 kohaku-frame-display = { path = "frame-display" }

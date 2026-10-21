@@ -4186,6 +4186,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "kohaku-checked-read"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "axum",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-math",
+ "hex",
+ "kohaku-frame-accounts",
+ "kohaku-frame-kit",
+ "kohaku-frame-ticket",
+ "kohaku-pir-rpc",
+ "kohaku-ticket-read",
+ "rand 0.10.2",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "kohaku-fork-kit"
 version = "0.1.0"
 dependencies = [
