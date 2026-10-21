@@ -1,0 +1,23 @@
+[package]
+name = "kohaku-frame-device-key"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy = { workspace = true }
+hex = { workspace = true }
+kohaku-frame-accounts = { workspace = true }
+kohaku-frame-kit = { workspace = true }
+kohaku-frame-pool = { workspace = true }
+kohaku-frame-registry = { workspace = true }
+kohaku-tornadocash = { workspace = true }
+p256 = { version = "0.13", features = ["ecdsa"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
