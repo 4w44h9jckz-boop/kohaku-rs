@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "checked-read",
+    "fhe-input",
     "fork-kit",
     "frame-accounts",
     "frame-display",
