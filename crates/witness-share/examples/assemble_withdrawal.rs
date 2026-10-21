@@ -1,6 +1,7 @@
 //! The committee's proof, put into the withdrawal `share_withdrawal` shared: read
 //! `withdrawal.json` and the proof the members wrote, build the transaction exactly as the
-//! wallet would have built it around its own proof, simulate it, and send it if `SEND` is set.
+//! wallet would have built it around its own proof at [`Pricing::Uniform`]
+//! ([`kohaku_frame_pool::chain::uniform_withdrawal`]'s limits), simulate it, and send it if `SEND` is set.
 //!
 //! ```text
 //! cargo run --release -p kohaku-witness-share --example assemble_withdrawal -- shares/withdrawal.json members.json
@@ -21,7 +22,7 @@ use kohaku_frame_kit::rpc;
 use kohaku_frame_pool::{
     PublicInputs,
     chain::WALLET_FEES,
-    withdrawal::{FramePool, PoolMode, WithdrawalOpts, withdrawal_tx},
+    withdrawal::{FramePool, PoolMode, Pricing, WithdrawalOpts, withdrawal_tx},
 };
 use serde::Deserialize;
 
@@ -94,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
     let opts = WithdrawalOpts {
         root_slot: Some(w.root_slot),
         fees: WALLET_FEES,
+        pricing: Pricing::Uniform,
         ..WithdrawalOpts::new(w.chain_id)
     };
     let tx = withdrawal_tx(&pool, &w.public_inputs, &proof, &opts)?;

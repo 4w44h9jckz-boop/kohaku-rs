@@ -21,7 +21,7 @@ use rand::CryptoRng;
 use crate::{
     FramePoolError, FramePoolProof, PublicInputs, prove,
     withdrawal::{
-        DENOMINATION, FramePool, POOL_FEES, WithdrawalOpts, WithdrawalTxError,
+        DENOMINATION, FramePool, POOL_FEES, Pricing, WithdrawalOpts, WithdrawalTxError,
         abi::{Deposit, RecentRoot, depositCall},
         tightened_limits, withdrawal_tx, worst_case_max_cost,
     },
@@ -150,10 +150,8 @@ pub async fn leaves<P: Provider>(
 /// `opts` (the pool's defaults when they are `None`). The shape alone sets it: the fee and the
 /// proof's bytes do not change a worst-case price, so it needs no proof.
 ///
-/// [`priced_withdrawal`] proves a draft at this fee with the default limits, simulates it, and
-/// tightens the limits. A wallet that does not prove for itself, and hands the witness to a
-/// committee instead, has no draft to simulate, and pays this fee at the default limits; a refund
-/// pool returns what the gas did not use.
+/// At the default limits this is [`uniform_fee`]; at [`tightened_limits`] it is what
+/// [`Pricing::Tightened`] binds.
 ///
 /// # Errors
 /// Returns an error if the shape cannot be built or priced.
@@ -162,29 +160,111 @@ pub fn worst_case_fee(
     recipient: Address,
     opts: &WithdrawalOpts,
 ) -> Result<U256, ChainError> {
-    let inputs = PublicInputs {
-        root: B256::ZERO,
-        nullifier_hash: B256::ZERO,
-        recipient,
-        relayer: pool.address,
-        fee: U256::MAX,
-        refund: U256::ZERO,
-    };
     let opts = WithdrawalOpts {
         sponsor: None,
         ..opts.clone()
     };
-    let shape = withdrawal_tx(pool, &inputs, &Bytes::from(vec![0; 256]), &opts)?;
+    let shape = withdrawal_tx(
+        pool,
+        &shape_inputs(pool, recipient),
+        &Bytes::from(vec![0; 256]),
+        &opts,
+    )?;
     Ok(worst_case_max_cost(&shape)?)
 }
 
-/// A pool-paid withdrawal of `note` to `recipient`, with its limits and its fee set the way
-/// `exp-frames` experiment 30 set them:
+/// The fee [`Pricing::Uniform`] binds into a withdrawal to `recipient`: the worst case at the
+/// pool's default limits, whatever `opts.execution_limits` says. It needs no proof and no
+/// simulation, so a wallet that hands its witness to a proving committee can fix it before
+/// sharing.
 ///
-/// 1. prove with a fee that covers the default limits in the worst case, and simulate;
-/// 2. tighten each frame's execution limit to a quarter over its use plus 5,000, never below
-///    the pool's floor;
-/// 3. fix the fee at the worst-case max cost of that shape, and prove again with it.
+/// # Errors
+/// Returns an error if the shape cannot be built or priced.
+pub fn uniform_fee(
+    pool: &FramePool,
+    recipient: Address,
+    opts: &WithdrawalOpts,
+) -> Result<U256, ChainError> {
+    worst_case_fee(
+        pool,
+        recipient,
+        &WithdrawalOpts {
+            execution_limits: None,
+            ..opts.clone()
+        },
+    )
+}
+
+/// A pool-paid withdrawal under [`Pricing::Uniform`]: the pool's default limits and
+/// [`uniform_fee`], proved once. No chain is needed.
+///
+/// # Errors
+/// Returns an error if the note is not among `leaves`, proving fails, or the shape cannot be
+/// priced.
+pub fn uniform_withdrawal(
+    pool: &FramePool,
+    note: &Note,
+    leaves: &[Field],
+    recipient: Address,
+    opts: &WithdrawalOpts,
+    rng: &mut impl CryptoRng,
+) -> Result<(FrameTx, FramePoolProof), ChainError> {
+    let opts = WithdrawalOpts {
+        sponsor: None,
+        execution_limits: None,
+        pricing: Pricing::Uniform,
+        ..opts.clone()
+    };
+    let fee = uniform_fee(pool, recipient, &opts)?;
+    let proof = prove(note.clone(), leaves, recipient, pool_payer(pool, fee), rng)?;
+    let tx = withdrawal_tx(pool, &proof.inputs, &proof.proof, &opts)?;
+    Ok((tx, proof))
+}
+
+/// A pool-paid withdrawal under [`Pricing::Tightened`], given what each frame of the
+/// default-limit shape used in a simulation: the limits [`tightened_limits`] makes of it, and the
+/// worst-case fee of that shape, proved once.
+///
+/// # Errors
+/// Returns an error if the note is not among `leaves`, proving fails, or the shape cannot be
+/// priced.
+pub fn tightened_withdrawal(
+    pool: &FramePool,
+    note: &Note,
+    leaves: &[Field],
+    recipient: Address,
+    opts: &WithdrawalOpts,
+    used: &[u64],
+    rng: &mut impl CryptoRng,
+) -> Result<(FrameTx, FramePoolProof), ChainError> {
+    let defaults = WithdrawalOpts {
+        sponsor: None,
+        execution_limits: None,
+        pricing: Pricing::Tightened,
+        ..opts.clone()
+    };
+    let shape = withdrawal_tx(
+        pool,
+        &shape_inputs(pool, recipient),
+        &Bytes::from(vec![0; 256]),
+        &defaults,
+    )?;
+    let tightened = WithdrawalOpts {
+        execution_limits: Some(tightened_limits(&shape, used)),
+        ..defaults
+    };
+    let fee = worst_case_fee(pool, recipient, &tightened)?;
+    let proof = prove(note.clone(), leaves, recipient, pool_payer(pool, fee), rng)?;
+    let tx = withdrawal_tx(pool, &proof.inputs, &proof.proof, &tightened)?;
+    Ok((tx, proof))
+}
+
+/// A pool-paid withdrawal of `note` to `recipient`, priced as `opts.pricing` says:
+///
+/// - [`Pricing::Uniform`], the default: [`uniform_withdrawal`], then one simulation to check it
+///   would succeed;
+/// - [`Pricing::Tightened`], `exp-frames` experiment 30's: a draft proved at the uniform fee and
+///   simulated, then [`tightened_withdrawal`] from what its frames used.
 ///
 /// The fee is the note's: with a refund pool the last frame returns what the gas did not use.
 /// `opts.execution_limits` is ignored and replaced.
@@ -197,32 +277,7 @@ pub async fn priced_withdrawal<P: Provider>(
     opts: &WithdrawalOpts,
     rng: &mut impl CryptoRng,
 ) -> Result<(FrameTx, FramePoolProof), ChainError> {
-    let proved = |fee: U256, rng: &mut _| {
-        let payer = Payer {
-            address: pool.address,
-            fee,
-            refund: U256::ZERO,
-        };
-        prove(note.clone(), leaves, recipient, payer, rng)
-    };
-    let worst = |limits: Option<Vec<u64>>| {
-        worst_case_fee(
-            pool,
-            recipient,
-            &WithdrawalOpts {
-                execution_limits: limits,
-                ..opts.clone()
-            },
-        )
-    };
-    let defaults = WithdrawalOpts {
-        sponsor: None,
-        execution_limits: None,
-        ..opts.clone()
-    };
-
-    let draft = proved(worst(None)?, rng)?;
-    let draft_tx = withdrawal_tx(pool, &draft.inputs, &draft.proof, &defaults)?;
+    let (draft_tx, draft) = uniform_withdrawal(pool, note, leaves, recipient, opts, rng)?;
     let sim = rpc::simulate(provider, &draft_tx, "latest").await?;
     if !sim.valid || sim.execution_status.as_deref() != Some("success") {
         return Err(ChainError::Draft(
@@ -231,26 +286,38 @@ pub async fn priced_withdrawal<P: Provider>(
                 .unwrap_or_else(|| "no reason given".to_owned()),
         ));
     }
-    let used: Vec<u64> = sim
-        .frames
-        .ok_or(ChainError::Missing("the simulation returned no frames"))?
-        .iter()
-        .map(|f| f.gas_used.to())
-        .collect();
-    let limits = tightened_limits(&draft_tx, &used);
+    match opts.pricing {
+        Pricing::Uniform => Ok((draft_tx, draft)),
+        Pricing::Tightened => {
+            let used: Vec<u64> = sim
+                .frames
+                .ok_or(ChainError::Missing("the simulation returned no frames"))?
+                .iter()
+                .map(|f| f.gas_used.to())
+                .collect();
+            tightened_withdrawal(pool, note, leaves, recipient, opts, &used, rng)
+        }
+    }
+}
 
-    let fee = worst(Some(limits.clone()))?;
-    let proof = proved(fee, rng)?;
-    let tx = withdrawal_tx(
-        pool,
-        &proof.inputs,
-        &proof.proof,
-        &WithdrawalOpts {
-            execution_limits: Some(limits),
-            ..defaults
-        },
-    )?;
-    Ok((tx, proof))
+fn pool_payer(pool: &FramePool, fee: U256) -> Payer {
+    Payer {
+        address: pool.address,
+        fee,
+        refund: U256::ZERO,
+    }
+}
+
+/// Public inputs for pricing a shape: only the recipient and the relayer change its bytes' cost.
+fn shape_inputs(pool: &FramePool, recipient: Address) -> PublicInputs {
+    PublicInputs {
+        root: B256::ZERO,
+        nullifier_hash: B256::ZERO,
+        recipient,
+        relayer: pool.address,
+        fee: U256::MAX,
+        refund: U256::ZERO,
+    }
 }
 
 /// A batch of pool-paid withdrawals from one wallet, from a keyed pool, all against the same

@@ -13,9 +13,10 @@
 //! standard error before the deposit, as `refund_withdrawal` prints it, so a deposit can be
 //! recovered, and nothing else.
 //!
-//! The wallet does not prove, so it has no draft to simulate and tighten, as
-//! `chain::priced_withdrawal` does. The fee is the worst case at the pool's default limits
-//! ([`chain::worst_case_fee`]); the refund pool returns what the gas did not use.
+//! The wallet does not prove, so it prices the withdrawal as [`Pricing::Uniform`] does: the
+//! pool's default limits and the worst-case fee at them ([`chain::uniform_fee`]), the limits and
+//! fee a wallet that proves for itself also uses by default. The refund pool returns what the gas
+//! did not use. [`Pricing::Tightened`] needs a draft proof, so it is refused here.
 //!
 //! [`assemble_withdrawal`]: ../assemble_withdrawal/index.html
 
@@ -30,7 +31,7 @@ use anyhow::{Context, ensure};
 use kohaku_frame_kit::{FrameSigner, rpc};
 use kohaku_frame_pool::{
     chain::{self, WALLET_FEES},
-    withdrawal::{FramePool, PoolMode, WithdrawalOpts},
+    withdrawal::{FramePool, PoolMode, Pricing, WithdrawalOpts},
 };
 use kohaku_tornadocash::{Note, Payer};
 use kohaku_witness_share::{Encoding, extend_witness, share, write};
@@ -78,7 +79,11 @@ async fn main() -> anyhow::Result<()> {
         fees: WALLET_FEES,
         ..WithdrawalOpts::new(chain_id)
     };
-    let fee = chain::worst_case_fee(&pool, recipient, &opts)?;
+    ensure!(
+        opts.pricing == Pricing::Uniform,
+        "a withdrawal proved by a committee has no draft to tighten from"
+    );
+    let fee = chain::uniform_fee(&pool, recipient, &opts)?;
     let payer = Payer {
         address: pool.address,
         fee,
@@ -104,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
         "deposit": deposited.receipt.transaction_hash,
         "publicInputs": public,
         "fees": "chain::WALLET_FEES",
+        "pricing": "uniform",
     });
     std::fs::write(
         out.join("withdrawal.json"),
