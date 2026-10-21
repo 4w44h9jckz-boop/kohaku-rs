@@ -1,0 +1,35 @@
+[package]
+name = "kohaku-frame-secrets"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes-gcm = { workspace = true }
+alloy = { workspace = true, features = ["signer-mnemonic"] }
+argon2 = { workspace = true }
+commonware-cryptography = { workspace = true }
+commonware-math = { workspace = true }
+hex = { workspace = true }
+hkdf = { workspace = true }
+k256 = { workspace = true, features = ["arithmetic"] }
+kohaku-frame-registry = { workspace = true }
+kohaku-frame-ticket = { workspace = true }
+kohaku-tornadocash = { workspace = true }
+kohaku-tornadocash-keychain = { workspace = true, features = ["signature"] }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+commonware-codec = { workspace = true }
+kohaku-frame-accounts = { workspace = true }
+kohaku-frame-kit = { workspace = true }
+kohaku-frame-pool = { workspace = true }
+kohaku-frame-wallet = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
