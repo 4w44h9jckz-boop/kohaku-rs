@@ -77,6 +77,26 @@ pub fn load_seed() -> anyhow::Result<Seed> {
     Ok(Seed::from_mnemonic(fs::read_to_string(path)?.trim())?)
 }
 
+/// Hand a recovered mnemonic on to the next step: written to `RECOVERED_SEED_FILE`, mode 0600,
+/// when that is set. Never printed. Whether it was written.
+pub fn hand_on_recovered(words: &str) -> anyhow::Result<bool> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let Some(path) = env::var("RECOVERED_SEED_FILE")
+        .ok()
+        .filter(|p| !p.is_empty())
+    else {
+        return Ok(false);
+    };
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&path)?;
+    std::io::Write::write_all(&mut f, format!("{words}\n").as_bytes())?;
+    Ok(true)
+}
+
 /// `key`'s own transaction making `calls`, simulated, sent and confirmed.
 pub async fn send<P: Provider>(
     provider: &P,
