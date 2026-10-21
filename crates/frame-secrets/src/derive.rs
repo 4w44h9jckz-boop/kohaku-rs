@@ -148,6 +148,12 @@ pub const PATHS: &[Path] = &[
         rebuilt_from: "the committee's blinded answer, posted on the board beside r * H(m)",
     },
     Path {
+        label: "ticket/<k>/binder",
+        kind: Kind::Secp256k1,
+        purpose: "the k-th ticket's one-time key: it signs the one transaction a bound ticket pays for (experiment 48)",
+        rebuilt_from: "derived; its address is in the bound ticket's message",
+    },
+    Path {
         label: "backup/<v>/key",
         kind: Kind::Bytes32,
         purpose: "the key of the v-th encrypted backup",
@@ -295,6 +301,11 @@ impl Seed {
             salt: B256::from(self.key(&format!("ticket/{k}/salt"))),
             blinding,
         })
+    }
+
+    /// The k-th ticket's one-time key, for a bound ticket.
+    pub fn binder(&self, k: u32) -> Result<PrivateKeySigner, DeriveError> {
+        self.secp256k1(&format!("ticket/{k}/binder"))
     }
 
     #[must_use]

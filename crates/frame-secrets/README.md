@@ -77,3 +77,12 @@ tickets, received openings, guardians, history) from fresh senders paid with tic
 `MODE=reopen`, given only the phrase and two guardians' shares, opens experiment 46's envelope,
 finds and opens every version, checks it against the chain, and measures what each leaked key
 opens. A run on 2026-10-21 posted in blocks 490,832 and 490,834.
+
+## A bound ticket (experiment 48)
+
+`examples/bound_ticket.rs` issues tickets whose message also names a one-time key,
+`ticket/<k>/binder` from the seed, through `kohaku-frame-ticket`'s `bound` module and
+`BoundTicketPaymaster.yul`. A fresh sender and a keyless pool withdrawal each spend one; the
+withdrawal's copies with raised fees, without the binder's entry, or with another binder are
+refused, while an unbound control's raised copy is mined. A run on 2026-10-21 did so in blocks
+491,564 to 491,578. `tests/record48.rs` reads it back.
