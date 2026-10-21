@@ -10,6 +10,7 @@ members = [
     "frame-ticket",
     "frame-wallet",
     "merkle-tree",
+    "noir-transfer",
     "ticket-read",
     "tornadocash",
     "tornadocash-circuit",
