@@ -12,12 +12,15 @@
 //! - [`contracts`]: the registry, the verifier and the applications, and their addresses.
 //! - [`groth16`]: the verifier's check, in Rust.
 //! - [`announce`]: encrypted announcements on a board, and a swap's offer and answer.
+//! - [`custody`]: `exp-frames` experiment 40's vaulted registry, each application's value in a
+//!   vault of its own, bound into what a withdrawal proves.
 //!
 //! Version 2 of the registry (`exp-frames` experiment 33) adds a deadline to every proof and
 //! makes a pair of updates a fair swap: each names the other's nullifier and change note.
 
 pub mod announce;
 pub mod contracts;
+pub mod custody;
 pub mod groth16;
 pub mod note;
 pub mod update;
