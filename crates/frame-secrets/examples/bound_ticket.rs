@@ -22,7 +22,10 @@
 //! With `SEND_RPC_URL` set, steps 3 to 5 send there (a mempool node, such as skandha): the fresh
 //! senders' spends, both withdrawals and every copy. Setup, every read and every receipt stay on
 //! `RPC_URL`, and the record names the URL each of those transactions was sent to, with the
-//! node's answer to each one word for word. Without it, nothing changes: every transaction goes
+//! node's answer to each one word for word. It also sends, in each arm, one more copy while the
+//! original is pending: fees raised by the bump and one byte of the calldata changed (the
+//! recipient's last), the binder's entry kept in the bound arm, and records which check refused
+//! it. Without it, nothing changes: every transaction goes
 //! to `RPC_URL` as before.
 //!
 //! The record keeps every transaction, what the issuers saw, and the template's length and
@@ -245,7 +248,54 @@ async fn try_send<P: Provider>(
         "sent": sent,
     });
     route.mark(&mut v);
+    if route.split() {
+        v["simulatedFrames"] = json!(simulated.frames);
+    }
     Ok(v)
+}
+
+/// The byte a calldata copy changes: the recipient's last, at `0x83` of `withdraw`'s 516 bytes.
+/// The pool checks or proves every byte of that calldata (selector, offsets, length, a zero
+/// refund, the addresses' high bytes; root, nullifier, recipient, relayer and fee as the proof's
+/// inputs; the proof itself), so there is no byte the proof and the pool leave free.
+const CALLDATA_BYTE: usize = 0x83;
+
+/// A copy of a withdrawal with its fees raised by the bump and one byte of its calldata changed.
+/// Its signature entries are kept as they were.
+fn calldata_copy(tx: &FrameTx) -> FrameTx {
+    let mut c = tx.clone();
+    c.fees = c.fees.bumped();
+    let w = c.frames.len() - 1;
+    let mut data = c.frames[w].data.to_vec();
+    data[CALLDATA_BYTE] ^= 1;
+    c.frames[w].data = Bytes::from(data);
+    c
+}
+
+/// Which check refused a copy, from the node's answers: its signature message, or the first
+/// prefix frame the simulation says failed; `construction` names the only check the change can
+/// reach, for when the node does not say.
+fn refused_by(v: &mut Value, construction: &str) {
+    let named = if v["sent"].get("result").is_some() {
+        "not refused".to_owned()
+    } else if v["simulation"]["violation"]
+        .as_str()
+        .is_some_and(|m| m.contains("authenticate"))
+    {
+        "the protocol's signature check".to_owned()
+    } else {
+        match v["simulatedFrames"]
+            .as_array()
+            .and_then(|f| f.iter().position(|x| x["succeeded"] == json!(false)))
+        {
+            Some(1) => "the pool's VERIFY: its proof".to_owned(),
+            Some(2) => "the paymaster's VERIFY".to_owned(),
+            Some(i) => format!("prefix frame {i}"),
+            None => "a validation-prefix frame the node does not name".to_owned(),
+        }
+    };
+    v["refusedBy"] = json!(named);
+    v["byConstruction"] = json!(construction);
 }
 
 /// A spend sent and confirmed. Unsplit, it is `common::executed`, as experiment 48 ran it;
@@ -524,6 +574,9 @@ async fn main() -> anyhow::Result<()> {
     // 4. The unbound control: a pending withdrawal, and a copy with raised fees.
     let wfees = rpc::suggest_fees(&provider, WITHDRAWAL_TIP).await?;
     let mut control = vec![];
+    // With SEND_RPC_URL only: one copy per arm with a calldata byte changed, sent while the
+    // original is pending and before the other copies.
+    let mut calldata_copies: Vec<Value> = vec![];
     let n_recipient = 10;
     {
         let (note, leaf, block) = notes[0].clone();
@@ -551,6 +604,21 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?,
         );
+        if route.split() {
+            let mut c = try_send(
+                &provider,
+                &mempool,
+                &route,
+                &calldata_copy(&w.tx),
+                "unbound: a copy with its fees raised and one calldata byte changed",
+            )
+            .await?;
+            refused_by(
+                &mut c,
+                "the pool's proof: the recipient is a public input, and nothing else reads it",
+            );
+            calldata_copies.push(c);
+        }
         control.push(
             try_send(
                 &provider,
@@ -604,6 +672,21 @@ async fn main() -> anyhow::Result<()> {
         c3.signatures = vec![binder_entry(other.address())];
         sign_all(&mut c3, &[FrameSigner::Secp256k1(other)])?;
         binding.push(try_send(&provider, &mempool, &route, &tx, "bound: the withdrawal").await?);
+        if route.split() {
+            let mut c = try_send(
+                &provider,
+                &mempool,
+                &route,
+                &calldata_copy(&tx),
+                "bound: a copy with its fees raised and one calldata byte changed, the binder's entry kept",
+            )
+            .await?;
+            refused_by(
+                &mut c,
+                "the protocol's signature check: the binder signed the original's hash, before any frame runs",
+            );
+            calldata_copies.push(c);
+        }
         binding.push(
             try_send(
                 &provider,
@@ -681,6 +764,7 @@ async fn main() -> anyhow::Result<()> {
         });
         if route.split() {
             record["sendRpcUrl"] = json!(route.send_url());
+            record["calldataCopies"] = json!(calldata_copies);
         }
         fs::write(
             &path,
@@ -718,5 +802,43 @@ mod tests {
         let mut v = json!({});
         r.mark(&mut v);
         assert_eq!(v["sentTo"], "http://127.0.0.1:14337/rpc/");
+    }
+}
+
+#[cfg(test)]
+mod calldata_tests {
+    use super::*;
+
+    #[test]
+    fn a_calldata_copy_changes_one_byte_and_bumps_the_fees() {
+        let tx = FrameTx {
+            frames: vec![Frame::sender(None).with_data(vec![0u8; 516])],
+            fees: kohaku_frame_kit::Fees {
+                max_priority_fee_per_gas: 100,
+                max_fee_per_gas: 200,
+                max_fee_per_blob_gas: 0,
+            },
+            ..FrameTx::default()
+        };
+        let c = calldata_copy(&tx);
+        let (a, b) = (&tx.frames[0].data, &c.frames[0].data);
+        let diff: Vec<usize> = (0..a.len()).filter(|&i| a[i] != b[i]).collect();
+        assert_eq!(diff, vec![CALLDATA_BYTE]);
+        assert_eq!(c.fees.max_priority_fee_per_gas, 110);
+        assert_eq!(c.signatures, tx.signatures);
+    }
+
+    #[test]
+    fn the_refusal_is_named_from_the_nodes_answers() {
+        let mut v = json!({ "sent": { "error": "x" }, "simulation": { "violation": "frame signature list does not authenticate the sender" } });
+        refused_by(&mut v, "c");
+        assert_eq!(v["refusedBy"], "the protocol's signature check");
+        let mut v = json!({ "sent": { "error": "x" }, "simulation": { "violation": "validation prefix frame reverted" },
+            "simulatedFrames": [{ "succeeded": true }, { "succeeded": false }] });
+        refused_by(&mut v, "c");
+        assert_eq!(v["refusedBy"], "the pool's VERIFY: its proof");
+        let mut v = json!({ "sent": { "result": "0x01" } });
+        refused_by(&mut v, "c");
+        assert_eq!(v["refusedBy"], "not refused");
     }
 }
