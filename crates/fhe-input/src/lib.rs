@@ -161,6 +161,14 @@ pub struct Encryption {
     pub e2: Vec<i64>,
 }
 
+// The names are the reference's (a, b, c1, c2, r, e1, m, e2, as in tfhe-zk-pok and its paper), and
+// the casts are its reductions modulo 2^64.
+#[allow(
+    clippy::many_single_char_names,
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn center_mod_q(x: i128, q: u64) -> i64 {
     if q == 0 {
         // The native modulus 2^64: wrap to i64.
@@ -172,6 +180,14 @@ fn center_mod_q(x: i128, q: u64) -> i64 {
     }
 }
 
+// The names are the reference's (a, b, c1, c2, r, e1, m, e2, as in tfhe-zk-pok and its paper), and
+// the casts are its reductions modulo 2^64.
+#[allow(
+    clippy::many_single_char_names,
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn polymul_rev(a: &[i64], b: &[i64]) -> Vec<i128> {
     let d = a.len();
     let mut c = vec![0i128; d];
@@ -190,6 +206,14 @@ fn polymul_rev(a: &[i64], b: &[i64]) -> Vec<i128> {
 
 /// A fresh key and an encryption of random `k` messages under it.
 #[must_use]
+// The names are the reference's (a, b, c1, c2, r, e1, m, e2, as in tfhe-zk-pok and its paper), and
+// the casts are its reductions modulo 2^64.
+#[allow(
+    clippy::many_single_char_names,
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 pub fn encrypt(p: &PkeParams, rng: &mut StdRng) -> Encryption {
     let (d, k, bound) = (p.d, p.k, p.b);
     let noise = |rng: &mut StdRng| (rng.r#gen::<u64>() % (2 * bound)) as i64 - bound as i64;
@@ -273,6 +297,7 @@ pub struct Run {
 /// # Panics
 ///
 /// If `tfhe-zk-pok` rejects the parameters.
+#[must_use]
 pub fn run<G: Curve + Send + Sync>(
     curve: &'static str,
     p: &PkeParams,
@@ -309,14 +334,22 @@ pub fn run<G: Curve + Send + Sync>(
     let proof = pke_v2::prove::<G>((&crs, &public), &private, &metadata, load, &seed_bytes);
     let prove_millis = t.elapsed().as_millis();
     let t = Instant::now();
-    let ok_batched =
-        pke_v2::verify::<G>(&proof, (&crs, &public), &metadata, VerificationPairingMode::Batched)
-            .is_ok();
+    let ok_batched = pke_v2::verify::<G>(
+        &proof,
+        (&crs, &public),
+        &metadata,
+        VerificationPairingMode::Batched,
+    )
+    .is_ok();
     let verify_batched_millis = t.elapsed().as_millis();
     let t = Instant::now();
-    let ok_two =
-        pke_v2::verify::<G>(&proof, (&crs, &public), &metadata, VerificationPairingMode::TwoSteps)
-            .is_ok();
+    let ok_two = pke_v2::verify::<G>(
+        &proof,
+        (&crs, &public),
+        &metadata,
+        VerificationPairingMode::TwoSteps,
+    )
+    .is_ok();
     let verify_two_steps_millis = t.elapsed().as_millis();
     let (mut c2, mut c1) = (enc.c2.clone(), enc.c1);
     c2[0] = c2[0].wrapping_add(1 << 40);
@@ -332,9 +365,13 @@ pub fn run<G: Curve + Send + Sync>(
         vec![0; p.k],
         &crs,
     );
-    let tampered_refused =
-        pke_v2::verify::<G>(&proof, (&crs, &tampered), &metadata, VerificationPairingMode::Batched)
-            .is_err();
+    let tampered_refused = pke_v2::verify::<G>(
+        &proof,
+        (&crs, &tampered),
+        &metadata,
+        VerificationPairingMode::Batched,
+    )
+    .is_err();
     let with_load = matches!(load, ComputeLoad::Proof);
     let (g1_points, g2_points) = (8, if with_load { 5 } else { 3 });
     Run {

@@ -33,7 +33,10 @@ fn main() -> anyhow::Result<()> {
     }
     if let Ok(path) = env::var("RECORD") {
         let record = json!({ "floors": floors, "runs": runs });
-        fs::write(&path, format!("{}\n", serde_json::to_string_pretty(&record)?))?;
+        fs::write(
+            &path,
+            format!("{}\n", serde_json::to_string_pretty(&record)?),
+        )?;
         println!("recorded in {path}");
     }
     Ok(())
