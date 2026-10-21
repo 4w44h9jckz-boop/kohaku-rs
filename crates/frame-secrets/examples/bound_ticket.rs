@@ -241,6 +241,16 @@ async fn main() -> anyhow::Result<()> {
     let mut steps = vec![];
 
     // 1. Two paymasters for one committee; tickets; two notes.
+    // A fresh seed's owner 0 does not exist yet, and the transfer that creates it is charged a new
+    // account's state gas; experiment 48's run topped up an owner 0 that already existed.
+    let owner_exists = provider.get_balance(owner.address()).await? > U256::ZERO
+        || provider.get_transaction_count(owner.address()).await? > 0
+        || !provider.get_code_at(owner.address()).await?.is_empty();
+    let top_up_state = if owner_exists {
+        0
+    } else {
+        TicketSponsor::NEW_ACCOUNT_STATE
+    };
     steps.push(
         send(
             &provider,
@@ -248,7 +258,8 @@ async fn main() -> anyhow::Result<()> {
             vec![
                 Frame::sender(Some(owner.address()))
                     .with_value(OWNER_TOP_UP)
-                    .with_execution(10_000),
+                    .with_execution(10_000)
+                    .with_state(top_up_state),
             ],
             "the funder tops up owner 0",
         )
