@@ -1,0 +1,38 @@
+{
+  "K": {
+    "account/0/recovery-salt/0": "0x81b52098292f740b653d46bfa407d5a126e1c1f41e333a2caf4004533387daab",
+    "account/0/salt": "0x76319dc487933e1a4d437e95f6d1520120d399b60173fc0682f98e08c4e6d59b",
+    "backup/0/key": "0xd8d1c09b338aabf45edbfdafb7efd835a866e2f01c1e2dc9ff6fbc6b95556377",
+    "backup/0/locator": "0x3351796e36a2877cc0ff3d80df27623014503ff33d036772baa045efeae5e9f0",
+    "pool/keychain": "0x64633eff0e5bb5b11d662ca584fdcbef6c69cd70c2518c5c2318a436bb81b11c",
+    "pool/recipient/0": "0x4e691f0f11f9576539a83c586b17239f107bf51bdf7686994ce480e0065d31fb",
+    "ticket/0/blinding": "0x6e33d3ef1df78a07b34a1aa0d0ebca6b42c94745db687bf1b1ceb611c6beb147",
+    "ticket/0/salt": "0x6ae1000b6a81723a5b080b70e7c2c5e36d2ca33efa3e8ce373c0cf08b3760829",
+    "ticket/0/sender": "0xf9907479aacc0d833dc3f9efa3213bcb7157486c8970939078d5bf8a08467441",
+    "view": "0xcca3defae04a4349058ff7f2ed52f91a694689f5894c4e5a9d2cbc4c9838efec"
+  },
+  "addresses": {
+    "pool/keychain": "0x3fe9801ee00df194e5d6a2a6c52e99b6d7232ad7",
+    "pool/recipient/0": "0x63c8b1b62de6e0070afe0445f0905b1c387db90d",
+    "ticket/0/sender": "0xed6e49ac27223d5a6e20b2877db95764e5780b17"
+  },
+  "custody": {
+    "label": "custody/0x7bc7902c7deabfbd7abd783c49ba7bf946d13314/0",
+    "nullifierSecret": "0x2721f158f06edc0380b1e8432ac5542580b67349da08d35f3e622dc8a8bd9ce9",
+    "secret": "0x13b7ddac38c1009e6a644c826200934e9255712d4588d41507cf6f090813660a",
+    "vault": "0x7bc7902c7deabfbd7abd783c49ba7bf946d13314"
+  },
+  "hkdf": {
+    "salt": "kohaku-seed-v1"
+  },
+  "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+  "owner": [
+    "0xf278cf59f82edcf871d630f28ecc8056f25c1cdb",
+    "0xf785bd075874b8423d3583728a981399f31e95aa"
+  ],
+  "ticketBlinding": {
+    "dst": "kohaku-seed-v1/ticket-blinding",
+    "scalar": "0x0743b70833c5494d915cf0422cb20b11da668e114a2395348c65130c8134ccff"
+  },
+  "view": "0x02662e96f2d2bc32c28c815f838b6440c9d522ddaf56cd13b8dd18cad9bd17e115"
+}

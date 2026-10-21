@@ -7,6 +7,7 @@ members = [
     "frame-kit",
     "frame-pool",
     "frame-registry",
+    "frame-secrets",
     "frame-ticket",
     "frame-wallet",
     "merkle-tree",
@@ -29,6 +30,7 @@ result_large_err = { level = "allow" }
 aes-gcm = "0.10.3"
 alloy = "2.4.1"
 alloy-sol-types = "1.7"
+argon2 = "0.5.3"
 anyhow = "1.0.104"
 ark-bn254 = "0.6.0"
 ark-ec = "0.6.0"
@@ -58,6 +60,7 @@ kohaku-frame-display = { path = "frame-display" }
 kohaku-frame-kit = { path = "frame-kit" }
 kohaku-frame-pool = { path = "frame-pool" }
 kohaku-frame-registry = { path = "frame-registry" }
+kohaku-frame-secrets = { path = "frame-secrets" }
 kohaku-frame-ticket = { path = "frame-ticket" }
 kohaku-frame-wallet = { path = "frame-wallet" }
 kohaku-merkle-tree = { path = "merkle-tree" }
