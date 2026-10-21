@@ -67,6 +67,13 @@ pub fn registry_v3_code() -> Vec<u8> {
 /// Never: the key is embedded, and a test parses it.
 #[must_use]
 pub fn kernel_key() -> VerifyingKey {
+    snarkjs_key(include_str!("../contracts/kernel.vkey.json")).expect("embedded verifying key")
+}
+
+/// A Groth16 verifying key from snarkjs's `zkey export verificationkey` JSON, with G2 points in
+/// EIP-197's order. `None` if the JSON is not such a key.
+#[must_use]
+pub fn snarkjs_key(json: &str) -> Option<VerifyingKey> {
     #[derive(Deserialize)]
     struct Json {
         #[serde(rename = "nPublic")]
@@ -78,20 +85,28 @@ pub fn kernel_key() -> VerifyingKey {
         #[serde(rename = "IC")]
         ic: Vec<Vec<String>>,
     }
-    let j: Json = serde_json::from_str(include_str!("../contracts/kernel.vkey.json"))
-        .expect("embedded verifying key is JSON");
-    let n = |s: &String| U256::from_str_radix(s, 10).expect("a decimal field element");
-    let g1 = |p: &[String]| [n(&p[0]), n(&p[1])];
+    let j: Json = serde_json::from_str(json).ok()?;
+    let n = |s: &String| U256::from_str_radix(s, 10).ok();
+    let g1 = |p: &[String]| Some([n(p.first()?)?, n(p.get(1)?)?]);
     // EIP-197's order: x1, x0, y1, y0.
-    let g2 = |p: &[Vec<String>]| [n(&p[0][1]), n(&p[0][0]), n(&p[1][1]), n(&p[1][0])];
-    assert_eq!(j.ic.len(), j.n_public + 1);
-    VerifyingKey {
-        alpha: g1(&j.vk_alpha_1),
-        beta: g2(&j.vk_beta_2),
-        gamma: g2(&j.vk_gamma_2),
-        delta: g2(&j.vk_delta_2),
-        ic: j.ic.iter().map(|p| g1(p)).collect(),
+    let g2 = |p: &[Vec<String>]| {
+        Some([
+            n(p.first()?.get(1)?)?,
+            n(p.first()?.first()?)?,
+            n(p.get(1)?.get(1)?)?,
+            n(p.get(1)?.first()?)?,
+        ])
+    };
+    if j.ic.len() != j.n_public + 1 {
+        return None;
     }
+    Some(VerifyingKey {
+        alpha: g1(&j.vk_alpha_1)?,
+        beta: g2(&j.vk_beta_2)?,
+        gamma: g2(&j.vk_gamma_2)?,
+        delta: g2(&j.vk_delta_2)?,
+        ic: j.ic.iter().map(|p| g1(p)).collect::<Option<_>>()?,
+    })
 }
 
 /// A version 3 registry. `keyed = false` is the control, which skips the owner check.
