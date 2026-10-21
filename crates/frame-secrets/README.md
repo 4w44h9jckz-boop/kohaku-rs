@@ -62,3 +62,18 @@ three guardians, a hostile pair the owner cancels, a rotation, the old set refus
 device, which joins `R`, opens the envelope with the phrase, starts a recovery to owner 1 that
 finishes after the delay, and rotates again. A run on 2026-10-21 did so in blocks 490,681 to
 490,743. `seed_wallet`'s restore accepts any of the seed's first owners, as a recovery leaves it.
+
+## `backup`: an encrypted backup anyone can store (experiment 47)
+
+```text
+key v      K("backup/<v>/key")          locator v   K("backup/<v>/locator")
+posted     locator (32) || nonce (12) || AES-256-GCM(padded, aad = locator) || tag (16)
+padded     uint32be(length) || plaintext || zeros, to a multiple of 2,048 bytes
+```
+
+One key and one locator per version, no tag byte. `examples/backup.rs` is experiment 47's run:
+`MODE=write` posts two versions of the wallet's state (contracts, committees, cursors, unspent
+tickets, received openings, guardians, history) from fresh senders paid with tickets;
+`MODE=reopen`, given only the phrase and two guardians' shares, opens experiment 46's envelope,
+finds and opens every version, checks it against the chain, and measures what each leaked key
+opens. A run on 2026-10-21 posted in blocks 490,832 and 490,834.

@@ -78,7 +78,12 @@ fn each_start_reveals_the_commitment_then_in_force() {
         ("rotates to R2", r.recover.commitment2),
     ] {
         let t = tx(&all, part);
-        let op = &t.frames.iter().find(|f| f.mode == mode::SENDER).unwrap().data;
+        let op = &t
+            .frames
+            .iter()
+            .find(|f| f.mode == mode::SENDER)
+            .unwrap()
+            .data;
         assert_eq!(op[0], 0x04);
         assert_eq!(B256::from_slice(&op[1..33]), want);
     }
@@ -93,9 +98,13 @@ fn each_envelope_is_one_size_under_its_locator() {
         r.setup.recovery_keys[1],
         r.recover.recovery_keys[1],
     ];
-    for (part, key) in ["envelope under R0", "envelope under R1", "envelope under R2"]
-        .iter()
-        .zip(keys)
+    for (part, key) in [
+        "envelope under R0",
+        "envelope under R1",
+        "envelope under R2",
+    ]
+    .iter()
+    .zip(keys)
     {
         let t = tx(&all, part);
         let post = t.frames.iter().find(|f| f.mode == mode::SENDER).unwrap();
