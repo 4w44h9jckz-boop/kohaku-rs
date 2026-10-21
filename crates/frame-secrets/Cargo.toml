@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+aes-gcm = { workspace = true }
 alloy = { workspace = true, features = ["signer-mnemonic"] }
+argon2 = { workspace = true }
 commonware-cryptography = { workspace = true }
 commonware-math = { workspace = true }
 hex = { workspace = true }
 hkdf = { workspace = true }
+k256 = { workspace = true, features = ["arithmetic"] }
 kohaku-frame-registry = { workspace = true }
 kohaku-frame-ticket = { workspace = true }
 kohaku-tornadocash = { workspace = true }

@@ -592,6 +592,7 @@ async fn restore<P: Provider>(provider: &P) -> anyhow::Result<()> {
 
     // The account: its address follows from the seed; the chain says whether it exists.
     let owner = seed.owner(0)?;
+    let mut account0_owner = None;
     let mut accounts = vec![];
     for i in 0..GAP {
         let a = account(&seed, i)?;
@@ -602,22 +603,31 @@ async fn restore<P: Provider>(provider: &P) -> anyhow::Result<()> {
         let slot0 = provider.get_storage_at(a.address(), U256::ZERO).await?;
         let slot1 = provider.get_storage_at(a.address(), U256::from(1)).await?;
         let balance = provider.get_balance(a.address()).await?;
-        ensure!(
-            Address::from_word(slot0.into()) == seed.owner(i)?.address(),
-            "account {i}'s owner is no longer owner {i}"
-        );
+        // A recovery (experiment 46) hands the account to another owner of the same seed.
+        let holder = Address::from_word(slot0.into());
+        let mut j = None;
+        for o in 0..GAP {
+            if seed.owner(o)?.address() == holder {
+                j = Some(o);
+            }
+        }
+        let j = j.with_context(|| format!("account {i} is owned by no owner of this seed"))?;
         println!(
-            "account {i}: {} owned by owner {i}, recovery commitment {}, balance {balance}",
+            "account {i}: {} owned by owner {j}, recovery commitment {}, balance {balance}",
             a.address(),
             B256::from(slot1)
         );
+        if i == 0 {
+            account0_owner = Some(seed.owner(j)?);
+        }
         accounts.push(json!({
             "index": i,
             "address": a.address(),
-            "owner": seed.owner(i)?.address(),
+            "owner": holder,
+            "ownerIndex": j,
             "commitment": B256::from(slot1),
             "balance": balance,
-            "from": "CREATE2(account/<i>/salt, owner i), then its code and slots 0 and 1",
+            "from": "CREATE2(account/<i>/salt, owner i), then its code and slots 0 and 1; the owner, any of the seed's first owners",
         }));
     }
     ensure!(!accounts.is_empty(), "no account found");
@@ -782,7 +792,8 @@ async fn restore<P: Provider>(provider: &P) -> anyhow::Result<()> {
     spends.push(s);
 
     let acct = account(&seed, 0)?;
-    spends.push(account_tx(provider, &acct, &owner, b"account 0, after the rebuild").await?);
+    let holder = account0_owner.context("no account 0")?;
+    spends.push(account_tx(provider, &acct, &holder, b"account 0, after the rebuild").await?);
 
     if let Ok(path) = env::var("RECORD") {
         let record = json!({

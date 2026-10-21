@@ -38,3 +38,27 @@ second is given the mnemonic and the contracts' public addresses only. It rebuil
 the chain, withdraws the pool note to a derived recipient, spends a ticket from a fresh sender,
 and sends from the account. A run on 2026-10-21 did so in blocks 490,517 to 490,538.
 `tests/record45.rs` reads that run's public record back.
+
+## `guardians`: a recovery key in guardians' hands, not the seed (experiment 46)
+
+```text
+R           a fresh secp256k1 key per guardian set, not derived from the seed
+shares      Shamir t-of-n of R over secp256k1's scalar field: index (1) || y (32)
+commitment  keccak256(salt || 1 || address(R)), salt = K("account/<i>/recovery-salt/<r>")
+envelope    0x20 || locator || nonce || AES-256-GCM(the words, padded to 216 bytes) || tag
+            key = HKDF-SHA256(R || Argon2id(phrase), salt = "kohaku-seed-envelope-v1", info = address(R))
+locator     keccak256("kohaku-seed-envelope-v1" || address(R))
+```
+
+`R` is the one device of `kohaku-frame-accounts`' `DeviceRecoveryAccount`, unchanged: it can
+start a recovery, behind the account's delay, which the owner can cancel. The envelope needs `R`
+and a phrase the user keeps, because the account's delay does not bind the seed: whoever opens
+the envelope has every note at once. `seal(.., None, ..)` builds the envelope `R` alone opens,
+which the experiment shows a quorum of guardians reading at once.
+
+`examples/guardians.rs` is experiment 46's run on experiment 45's account. `MODE=setup`: a set of
+three guardians, a hostile pair the owner cancels, a rotation, the old set refused.
+`MODE=recover`, with no seed and no funder key: two guardians post their shares sealed to a new
+device, which joins `R`, opens the envelope with the phrase, starts a recovery to owner 1 that
+finishes after the delay, and rotates again. A run on 2026-10-21 did so in blocks 490,681 to
+490,743. `seed_wallet`'s restore accepts any of the seed's first owners, as a recovery leaves it.
