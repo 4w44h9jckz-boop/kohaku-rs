@@ -27,6 +27,10 @@
 //! withdraws a pool note to a derived recipient, spends a ticket from a fresh sender, and sends a
 //! transaction from the account.
 //!
+//! With `SEND_RPC_URL` set, `MODE=restore` sends its three spends (the withdrawal, the ticket and
+//! the account's transaction) to that node, a mempool such as skandha, and records the URL and
+//! the node's answer for each; reads and receipts stay on `RPC_URL`. Without it, nothing changes.
+//!
 //! Neither mode prints or records the mnemonic or a derived secret.
 
 use std::{env, fs, os::unix::fs::PermissionsExt};
@@ -176,9 +180,60 @@ async fn executed<P: Provider>(provider: &P, tx: &FrameTx, what: &str) -> anyhow
     }))
 }
 
+/// Where a spend of `MODE=restore` is sent: `None` for `RPC_URL`, as experiment 45 ran it, or a
+/// mempool node and its URL, from `SEND_RPC_URL`.
+type Mempool<'a, P> = Option<(&'a P, &'a str)>;
+
+/// A spend sent and confirmed. Without a mempool it is [`executed`]; with one it is simulated and
+/// awaited on `provider`, sent to the mempool, and the record carries the URL and its answer.
+async fn sent_spend<P: Provider>(
+    provider: &P,
+    mempool: Mempool<'_, P>,
+    tx: &FrameTx,
+    what: &str,
+) -> anyhow::Result<Value> {
+    let Some((node, url)) = mempool else {
+        return executed(provider, tx, what).await;
+    };
+    let simulated = rpc::simulate(provider, tx, "latest").await?;
+    ensure!(
+        simulated.valid,
+        "{what}: {}",
+        simulated.violation.clone().unwrap_or_default()
+    );
+    let answer = match rpc::send(node, tx).await {
+        Ok(hash) => json!({ "result": hash }),
+        Err(e) => anyhow::bail!("{what}: {url} refused it: {e}"),
+    };
+    let r = rpc::wait_for_confirmed_receipt(
+        provider,
+        tx.hash(),
+        std::time::Duration::from_mins(3),
+        std::time::Duration::from_secs(2),
+    )
+    .await?;
+    println!(
+        "{what}: {} sent to {url}, block {} gasUsed {}",
+        tx.hash(),
+        r.block_number,
+        r.gas_used
+    );
+    Ok(json!({
+        "what": what,
+        "hash": tx.hash(),
+        "raw": tx.encode(),
+        "block": r.block_number,
+        "gasUsed": r.gas_used,
+        "payer": r.payer,
+        "sentTo": url,
+        "answer": answer,
+    }))
+}
+
 /// A transaction from the account, signed by its owner: one post to the board.
 async fn account_tx<P: Provider>(
     provider: &P,
+    mempool: Mempool<'_, P>,
     acct: &DeviceRecoveryAccount,
     owner: &PrivateKeySigner,
     message: &[u8],
@@ -189,7 +244,7 @@ async fn account_tx<P: Provider>(
         .call(post_frame(BOARD, message))
         .build(&envelope)?;
     sign_all(&mut tx, &[FrameSigner::Secp256k1(owner.clone())])?;
-    executed(provider, &tx, "the account, signed by its owner").await
+    sent_spend(provider, mempool, &tx, "the account, signed by its owner").await
 }
 
 /// A fresh sender's first transaction, paid with `ticket`: it posts to the board.
@@ -279,7 +334,15 @@ async fn main() -> anyhow::Result<()> {
     let provider = ProviderBuilder::new().connect_http(url.parse()?);
     match env::var("MODE").as_deref() {
         Ok("build") => build(&provider).await,
-        Ok("restore") => restore(&provider).await,
+        Ok("restore") => {
+            // With SEND_RPC_URL, the three spends go to that node; reads, receipts and
+            // everything else stay on RPC_URL.
+            let send_url = env::var("SEND_RPC_URL").ok().filter(|u| !u.is_empty());
+            let node =
+                ProviderBuilder::new().connect_http(send_url.as_deref().unwrap_or(&url).parse()?);
+            let mempool = send_url.as_deref().map(|u| (&node, u));
+            restore(&provider, mempool).await
+        }
         _ => anyhow::bail!("MODE is build or restore"),
     }
 }
@@ -475,7 +538,7 @@ async fn build<P: Provider>(provider: &P) -> anyhow::Result<()> {
     );
 
     // 4. The account, used.
-    steps.push(account_tx(provider, &acct, &owner, b"account 0, before the loss").await?);
+    steps.push(account_tx(provider, None, &acct, &owner, b"account 0, before the loss").await?);
 
     let public = json!({
         "chainId": chain_id,
@@ -577,7 +640,7 @@ async fn vault_events<P: Provider>(
 }
 
 #[allow(clippy::too_many_lines)]
-async fn restore<P: Provider>(provider: &P) -> anyhow::Result<()> {
+async fn restore<P: Provider>(provider: &P, mempool: Mempool<'_, P>) -> anyhow::Result<()> {
     let seed = load_seed(false)?;
     let public: Value = serde_json::from_str(&fs::read_to_string(
         env::var("PUBLIC").context("PUBLIC names the public addresses")?,
@@ -768,7 +831,7 @@ async fn restore<P: Provider>(provider: &P) -> anyhow::Result<()> {
         ..WithdrawalOpts::new(chain_id)
     };
     let tx = withdrawal_tx(&pool(), &proof.inputs, &proof.proof, &opts)?;
-    let mut w = executed(provider, &tx, "the rebuilt pool note, withdrawn").await?;
+    let mut w = sent_spend(provider, mempool, &tx, "the rebuilt pool note, withdrawn").await?;
     let received = provider.get_balance(recipient).await?;
     ensure!(received == U256::from(DENOMINATION - u128::from(POOL_FEE)));
     w["recipient"] = json!({ "path": format!("pool/recipient/{n}"), "address": recipient, "received": received });
@@ -787,13 +850,22 @@ async fn restore<P: Provider>(provider: &P) -> anyhow::Result<()> {
         paymaster,
         b"paid with a ticket rebuilt from the seed",
     )?;
-    let s = executed(provider, &tx, "a rebuilt ticket, spent").await?;
+    let s = sent_spend(provider, mempool, &tx, "a rebuilt ticket, spent").await?;
     ensure!(s["payer"] == json!(paymaster), "the paymaster did not pay");
     spends.push(s);
 
     let acct = account(&seed, 0)?;
     let holder = account0_owner.context("no account 0")?;
-    spends.push(account_tx(provider, &acct, &holder, b"account 0, after the rebuild").await?);
+    spends.push(
+        account_tx(
+            provider,
+            mempool,
+            &acct,
+            &holder,
+            b"account 0, after the rebuild",
+        )
+        .await?,
+    );
 
     if let Ok(path) = env::var("RECORD") {
         let record = json!({

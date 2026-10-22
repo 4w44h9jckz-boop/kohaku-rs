@@ -86,3 +86,13 @@ checks against its share's key.
 
 The crate is left out of CI's `wasm32-unknown-unknown` check: `blst` compiles C, and for that
 target it needs clang, which CI's nix shell does not provide.
+
+## Bound tickets (`bound`)
+
+`exp-frames` experiment 48, and the mempool's claim-gated admission's CG-12. The ticket's message
+gains the 20-byte address of a one-time key the buyer chose (152 bytes), the pay frame carries it
+(188 bytes), and the transaction carries that key's secp256k1 signature over its signature hash.
+`contracts/BoundTicketPaymaster.yul` (its creation code in `BoundTicketPaymaster.hex`, solc 0.8.37,
+EVM version osaka, optimizer on, 200 runs) checks the pairing over the 152-byte message and
+requires that entry. Its template, the code before the key and the denomination, is 1,185 bytes
+with keccak256 `0x52c656815e560bb189c3fb362c9628432ca1ed6b720e239857775236c18bc1d3`.

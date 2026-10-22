@@ -12,8 +12,10 @@
 //! - [`issuers`]: the committee, its key made by Commonware's DKG.
 //! - [`ticket`]: the message a ticket signs and the bytes a transaction carries.
 //! - [`paymaster`]: the paymaster's code, a purchase, and the pay frame.
+//! - [`bound`]: a ticket bound to its transaction through a one-time key (experiment 48).
 
 pub mod blind;
+pub mod bound;
 pub mod issuers;
 pub mod paymaster;
 pub mod ticket;

@@ -30,6 +30,9 @@
 //! rebuilt from the board. Last, guardians 1 and 2 with the phrase open the first envelope, which
 //! is still on the board.
 //!
+//! With `RECOVERED_SEED_FILE` set, `MODE=recover` writes the recovered mnemonic there (mode 0600)
+//! for the next step, such as `seed_wallet MODE=restore` with that file as its `SEED_FILE`.
+//!
 //! No key, share, phrase or word is printed or recorded.
 
 mod common;
@@ -476,6 +479,9 @@ async fn recover_mode<P: Provider>(provider: &P) -> anyhow::Result<()> {
     )?;
     let open_ms = started.elapsed().as_millis();
     let seed = Seed::from_mnemonic(&words)?;
+    if common::hand_on_recovered(&words)? {
+        println!("the recovered mnemonic is in RECOVERED_SEED_FILE");
+    }
     let acct = account(&seed, 0)?;
     ensure!(
         acct.address() == account_address,

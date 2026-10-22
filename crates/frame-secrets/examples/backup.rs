@@ -19,6 +19,11 @@
 //! the envelope from the board, and has the seed; it finds and opens every backup version, and
 //! checks what they say against the chain. Then it measures what each leaked key opens.
 //!
+//! On one fresh seed, run after `guardians MODE=recover` rather than before: `HISTORY` may then be
+//! left unset (the history starts empty), `HELPERS=7,9` names the guardians who help, and the
+//! account may be held by any of the seed's first three owners. With `RECOVERED_SEED_FILE` set,
+//! `MODE=reopen` writes the recovered mnemonic there (mode 0600).
+//!
 //! No key, share, phrase, word or plaintext is printed or recorded; the record keeps each
 //! plaintext's SHA-256.
 
@@ -61,9 +66,20 @@ const T: usize = 2;
 const FIRST_TICKET: u32 = 5;
 const TIP: u128 = common::TIP;
 const REGISTRY: Address = address!("0x246FBf1ca115E6f9993658e0e46F24E4C9054Df6");
-/// Experiment 46's current set, and the two who help.
+/// Experiment 46's current set, and the two who help unless `HELPERS` names others.
 const SET: u32 = 2;
 const HELPERS: [usize; 2] = [7, 9];
+
+/// The guardians who help reopen: `HELPERS`, comma-separated, or 7 and 9.
+fn helpers() -> anyhow::Result<Vec<usize>> {
+    match env::var("HELPERS").ok().filter(|h| !h.is_empty()) {
+        None => Ok(HELPERS.to_vec()),
+        Some(h) => h
+            .split(',')
+            .map(|g| g.trim().parse().context("HELPERS"))
+            .collect(),
+    }
+}
 const OLD_SET: [usize; 2] = [1, 2];
 
 fn state(name: &str) -> anyhow::Result<PathBuf> {
@@ -139,7 +155,8 @@ async fn write<P: Provider>(provider: &P) -> anyhow::Result<()> {
         .find(|&j| seed.owner(j).is_ok_and(|o| o.address() == holder))
         .context("account 0 is owned by none of the seed's first owners")?;
     let mut history: Vec<String> = vec![];
-    for path in env::var("HISTORY").context("HISTORY")?.split(',') {
+    let paths = env::var("HISTORY").unwrap_or_default();
+    for path in paths.split(',').filter(|p| !p.is_empty()) {
         let r: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
         for list in ["steps", "spends"] {
             for s in r[list].as_array().into_iter().flatten() {
@@ -267,7 +284,7 @@ fn seed_from(
     board: &[announce::Posted],
     shares: &[Share],
     phrase: &str,
-) -> anyhow::Result<(Seed, Address, B256)> {
+) -> anyhow::Result<(Seed, Address, B256, String)> {
     let r = guardians::join(shares, T)?;
     let found = board
         .iter()
@@ -282,7 +299,7 @@ fn seed_from(
         &r,
         Some(&guardians::stretch(phrase, r.address())),
     )?;
-    Ok((Seed::from_mnemonic(&words)?, r.address(), found.tx))
+    Ok((Seed::from_mnemonic(&words)?, r.address(), found.tx, words))
 }
 
 /// Every backup version a seed finds on the board, opened, in order.
@@ -309,14 +326,19 @@ async fn reopen<P: Provider>(provider: &P) -> anyhow::Result<()> {
     let board = board_messages(provider, BOARD).await?;
 
     // The seed, through the current guardians.
-    let helpers: Vec<Share> = HELPERS
+    let named = helpers()?;
+    let helpers: Vec<Share> = named
         .iter()
         .map(|&g| share_of(g))
         .collect::<Result<_, _>>()?;
-    let (seed, r2, envelope_tx) = seed_from(&board, &helpers, &phrase)?;
+    let (seed, r2, envelope_tx, words) = seed_from(&board, &helpers, &phrase)?;
     println!(
-        "guardians 7 and 9 handed over their shares; the envelope in {envelope_tx} gave the seed"
+        "guardians {named:?} handed over their shares; the envelope in {envelope_tx} gave the seed"
     );
+    if common::hand_on_recovered(&words)? {
+        println!("the recovered mnemonic is in RECOVERED_SEED_FILE");
+    }
+    drop(words);
 
     // Every version.
     let found = versions(&seed, &board);
@@ -346,11 +368,18 @@ async fn reopen<P: Provider>(provider: &P) -> anyhow::Result<()> {
         .as_str()
         .context("account")?
         .parse()?;
-    let owner_index = u32::try_from(latest["account"]["owner"].as_u64().context("owner")?)?;
+    let owner_named = u32::try_from(latest["account"]["owner"].as_u64().context("owner")?)?;
     let slot0 = provider.get_storage_at(acct, U256::ZERO).await?;
-    ensure!(Address::from_word(slot0.into()) == seed.owner(owner_index)?.address());
+    let holder = Address::from_word(slot0.into());
+    // Experiment 47 ran after the recovery, so the owner it named still held the account. Run
+    // before the recovery, the backup names owner 0 and the recovery since moved it to owner 1.
+    let owner_now = (0..3u32)
+        .find(|&j| seed.owner(j).is_ok_and(|o| o.address() == holder))
+        .context("account 0 is owned by none of the seed's first owners")?;
     ensure!(account(&seed, 0)?.address() == acct);
-    checks.push(json!({ "what": "the account is the seed's account 0, owned by the owner the backup names", "ok": true }));
+    checks.push(json!({
+        "what": "the account is the seed's account 0, owned by one of its first three owners",
+        "ok": true, "ownerNamed": owner_named, "ownerNow": owner_now }));
     for t in latest["tickets"].as_array().context("tickets")? {
         let k = u32::try_from(t["k"].as_u64().context("k")?)?;
         let pm = &latest["paymasters"]
@@ -438,7 +467,7 @@ async fn reopen<P: Provider>(provider: &P) -> anyhow::Result<()> {
         .iter()
         .map(|&g| share_of(g))
         .collect::<Result<_, _>>()?;
-    let (old_seed, r0, old_envelope) = seed_from(&board, &old, &phrase)?;
+    let (old_seed, r0, old_envelope, _) = seed_from(&board, &old, &phrase)?;
     let old_opens = versions(&old_seed, &board).len();
     let history_in_latest = latest["history"].as_array().map_or(0, Vec::len);
     let leak = json!([
@@ -494,7 +523,7 @@ async fn reopen<P: Provider>(provider: &P) -> anyhow::Result<()> {
 
     if let Ok(path) = env::var("RECORD") {
         let record = json!({
-            "given": ["the phrase", "guardians 7 and 9's shares, off the chain"],
+            "given": ["the phrase", format!("guardians {named:?}'s shares, off the chain")],
             "envelope": envelope_tx,
             "recoveryKey": r2,
             "versions": opened,
