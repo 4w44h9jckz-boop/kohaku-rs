@@ -1,0 +1,25 @@
+[package]
+name = "kohaku-frame-pool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy = { workspace = true }
+anyhow = { workspace = true }
+hex = { workspace = true }
+kohaku-frame-kit = { workspace = true }
+kohaku-merkle-tree = { workspace = true }
+kohaku-tornadocash = { workspace = true }
+kohaku-tornadocash-circuit = { workspace = true }
+rand = { workspace = true }
+ruint = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+kohaku-fork-kit = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

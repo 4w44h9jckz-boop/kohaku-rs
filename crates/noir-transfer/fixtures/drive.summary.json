@@ -1,0 +1,32 @@
+{
+  "depth": 32,
+  "compileMs": 1134,
+  "witnessMs": 107,
+  "root": "0x164a556f3d835a67c77da87b058aa8e6819537b31f8ce3905c694362fb71512e",
+  "nullifiers": [
+    "0x2810a6df7a7bfde124e30bfeb4712d02d90e7d12316568c5cf604fe8ffc828a0",
+    "0x044a174725bbf9648c25c58ce5a88f438a0238dd7a5d665b565986129888a098"
+  ],
+  "outHashes": [
+    "0x2ea6a625bf7f5ae7ea3bf26769399d41093012b24970ddf69aee833a89517fbb",
+    "0x0dbbe87e56ddafc79fa79aa0b98f152e7b36d43e8a79cc53b283fafeec111e62"
+  ],
+  "fee": "1",
+  "context": "0x0000000000000000000000000000000000000000000000000000000000c0ffee",
+  "targets": {
+    "evm": {
+      "proveMs": 1106,
+      "verifiedNatively": true,
+      "proofBytes": 8000,
+      "publicInputs": 7,
+      "verifierSolBytes": 103843
+    },
+    "evm-no-zk": {
+      "proveMs": 468,
+      "verifiedNatively": true,
+      "proofBytes": 7072,
+      "publicInputs": 7,
+      "verifierSolBytes": 94876
+    }
+  }
+}

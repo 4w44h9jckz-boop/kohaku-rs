@@ -1,0 +1,28 @@
+[package]
+name = "kohaku-frame-wallet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy = { workspace = true }
+anyhow = { workspace = true }
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+hex = { workspace = true }
+kohaku-frame-accounts = { workspace = true }
+kohaku-frame-kit = { workspace = true }
+kohaku-frame-pool = { workspace = true }
+kohaku-tornadocash = { workspace = true }
+kohaku-tornadocash-keychain = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync"] }
+
+[dev-dependencies]
+kohaku-frame-display = { workspace = true }
+reqwest = { workspace = true }
+
+[lints]
+workspace = true

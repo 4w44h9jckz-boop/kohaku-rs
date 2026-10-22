@@ -78,6 +78,26 @@ impl Withdrawal {
         merkle_proof: &MerkleProof,
         rng: &mut impl CryptoRng,
     ) -> Result<ProvenWithdrawal, WithdrawalError> {
+        let circuit_inputs = self.circuit_inputs(merkle_proof)?;
+        let proof = prove(&circuit_inputs, rng)?;
+        Ok(ProvenWithdrawal {
+            root: merkle_proof.root,
+            proof,
+            inner: self,
+        })
+    }
+}
+
+impl Withdrawal {
+    /// The circuit's inputs for this withdrawal, public and private: what [`Withdrawal::prove`]
+    /// proves, and what a wallet hands a proving committee in shares instead.
+    ///
+    /// # Errors
+    /// Returns an error if `merkle_proof` is not for this withdrawal's note.
+    pub fn circuit_inputs(
+        &self,
+        merkle_proof: &MerkleProof,
+    ) -> Result<CircuitInputs, WithdrawalError> {
         if merkle_proof.leaf != self.note.commitment() {
             return Err(WithdrawalError::ProofLeafMismatch {
                 expected: self.note.commitment(),
@@ -89,7 +109,7 @@ impl Withdrawal {
         let path_elements = from_fn(|i| path_elements[i].into());
         let path_indices = from_fn(|i| U256::from(merkle_proof.path[i]));
 
-        let circuit_inputs = CircuitInputs::new(
+        Ok(CircuitInputs::new(
             merkle_proof.root.into(),
             self.note.nullifier_hash().into(),
             self.recipient.into_word().into(),
@@ -100,14 +120,7 @@ impl Withdrawal {
             self.note.secret.into(),
             path_elements,
             path_indices,
-        );
-
-        let proof = prove(&circuit_inputs, rng)?;
-        Ok(ProvenWithdrawal {
-            root: merkle_proof.root,
-            proof,
-            inner: self,
-        })
+        ))
     }
 }
 

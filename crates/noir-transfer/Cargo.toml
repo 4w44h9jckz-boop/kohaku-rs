@@ -1,0 +1,18 @@
+[package]
+name = "kohaku-noir-transfer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+acir = "=1.0.0-rc.6"
+acvm = "=1.0.0-rc.6"
+anyhow = { workspace = true }
+barretenberg-rs = { version = "=5.2.1", default-features = false, features = ["native"] }
+base64 = "0.22"
+bn254_blackbox_solver = "=1.0.0-rc.6"
+flate2 = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "kohaku-frame-display"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy = { workspace = true, features = ["eip712"] }
+kohaku-frame-kit = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+
+[lints]
+workspace = true

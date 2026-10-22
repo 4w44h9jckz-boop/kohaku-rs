@@ -1,0 +1,26 @@
+{
+  "$comment": "What the wallet itself knows, beside the descriptors: its token list, its address book, and the accounts it set up, with the implementation each runs.",
+  "tokens": [
+    { "chainId": 8141, "address": "0x8C2c146c8C13c4436B20d7880C07fbeEae304B2a", "name": "Token A", "ticker": "TKA", "decimals": 18 },
+    { "chainId": 8141, "address": "0x7f6B1f38F2AE6B5683CDfFED8EF35Bca3349Cc69", "name": "Token B", "ticker": "TKB", "decimals": 18 },
+    { "chainId": 8141, "address": "0x2700000000000000000000000000000000000010", "name": "Vector token", "ticker": "VEC", "decimals": 18 }
+  ],
+  "names": [
+    { "chainId": 8141, "address": "0x336D9De562E6F9cbbD3D49be3a4810A854173E47", "name": "the merchant" },
+    { "chainId": 8141, "address": "0xC549C8FdaFd2ef85A758D04F7A5D77249d62Cc28", "name": "the session key" },
+    { "chainId": 8141, "address": "0xC925Ee6cb70CFd7B97bBb93B5b070C185e43159E", "name": "the paymaster service" },
+    { "chainId": 8141, "address": "0x53854d35EF0B532d8837DB54e61957D2ADC4bd77", "name": "the paymaster service" },
+    { "chainId": 8141, "address": "0x9D29Ff745f5306ccd52A066D11Ce0F964B3d13E6", "name": "the paymaster service's signer" },
+    { "chainId": 8141, "address": "0xb6b1356962237583521cEb192ac6EF7732Ff2E99", "name": "the paymaster service's signer" },
+    { "chainId": 8141, "address": "0x87761a88398830f371282d2d3e35D227ebfb8777", "name": "sponsor 1" },
+    { "chainId": 8141, "address": "0x4961aee884E101Ee95f4728eaC541841cB9E93C3", "name": "sponsor 2" },
+    { "chainId": 8141, "address": "0x2700000000000000000000000000000000000013", "name": "a friend" }
+  ],
+  "accounts": [
+    { "chainId": 8141, "address": "0x998bB2F3B526e56D12415D02b36580E295fc2B78", "implementation": "SimpleAccount", "args": { "owner": "0xa93CEe06b1e4fFACdf920BD500cb301a39DdEB74" } },
+    { "chainId": 8141, "address": "0x49f30D74edd539CdB026Bd05f05B9359C719276A", "implementation": "SessionAccount", "args": { "owner": "0xB66e53F7394A5069933103cAD898194181f8574E" } },
+    { "chainId": 8141, "address": "0x2700000000000000000000000000000000000001", "implementation": "ExecutionScopeAccount", "args": { "owner": "0xCA17f5f5Ac896C0591899ab457eB57310682757c" } },
+    { "chainId": 8141, "address": "0x2700000000000000000000000000000000000002", "implementation": "ExecutionScopeAccount", "args": { "owner": "0xCA17f5f5Ac896C0591899ab457eB57310682757c" } },
+    { "chainId": 8141, "address": "0x2700000000000000000000000000000000000003", "implementation": "ExecutionScopeAccount", "args": { "owner": "0xCA17f5f5Ac896C0591899ab457eB57310682757c" } }
+  ]
+}

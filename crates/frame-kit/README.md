@@ -1,0 +1,33 @@
+# kohaku-frame-kit
+
+Experimental. Build, sign and submit EIP-8141 frame transactions (type `0x06`), as the ethrex
+Hegota testnet implements them: EIP-8141 with EIP-8250 keyed nonces and EIP-8272 recent roots.
+It is to frame transactions what `kohaku-userop-kit` is to ERC-4337 user operations, and it is
+much smaller, because the account, the paymaster and the bundler of 4337 are all frames of one
+transaction here.
+
+- `tx`: the envelope, its RLP in both directions, the transaction hash and the signature hash;
+  `Fees::bumped` for a replacement, which ethrex accepts only when both fees rise by 10%.
+- `gas`: intrinsic gas, the calldata floor, `max_cost` and settlement from frame receipts.
+- `sign`: secp256k1 and P256 signing, with the ordering several signers need.
+- `digest`: the execution-scope digest of `exp-frames` experiment 27's draft ERC, an EIP-712
+  hash of every frame except the payer's, which an execution-only signature entry carries as its
+  `msg` so that a payer can be chosen, or replaced, after the sender signs.
+- `json` and `rpc` (feature `rpc`, on by default): the node's JSON shapes, simulation through
+  `ethrex_simulateFrameTransaction`, submission and receipts. `execute` returns only once a block
+  has been built on the receipt's block (`wait_for_confirmed_receipt`): ethrex can serve a receipt
+  from a block it then replaces.
+
+The tests are offline. They re-encode 238 transactions mined on the testnet, by the `exp-frames`
+experiments and by the `kohaku-frame-pool` and `kohaku-frame-accounts` examples
+(`tests/fixtures/chain/`: every Hegota fixture `exp-frames` keeps, copied unchanged), to their
+on-chain hashes; check every secp256k1 and P256 signature over the signature hash computed here,
+and that every `ARBITRARY` entry names no signer, since the account's own `VERIFY` checks it;
+settle each one to its receipt's `gasUsed`; and match the
+golden vector in ethrex's `scripts/hegota-testnet/frametx.py`. `tests/mempool.rs` checks the
+replacement rule and the receipt rule, both from `exp-frames` experiment 19, against a mocked
+node. `tests/execution_digest.rs` computes experiment 27's vectors through alloy's EIP-712 encoder and
+matches the digests viem produced for them, in both of its sets: eleven under EIP-8250 at master,
+where `nonce_keys == []` selects the legacy nonce, and ten under `f3079a09e8`, which the Hegota
+testnet pins, where `[0]` did. `FrameTx::decode` applies the testnet's nonce-key rules;
+`FrameTx::decode_with(raw, Eip8250::Master)` applies master's.

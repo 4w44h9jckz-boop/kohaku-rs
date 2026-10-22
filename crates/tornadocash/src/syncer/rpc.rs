@@ -46,7 +46,7 @@ impl<P: Provider> RpcSyncer<P> {
         Self {
             provider,
             batch_size: 10,
-            batch_delay: Duration::from_millis(1000),
+            batch_delay: Duration::from_secs(1),
         }
     }
 

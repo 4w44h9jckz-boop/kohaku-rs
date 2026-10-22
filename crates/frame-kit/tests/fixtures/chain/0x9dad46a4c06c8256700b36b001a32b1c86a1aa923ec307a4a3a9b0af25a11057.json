@@ -1,0 +1,116 @@
+{
+  "meta": {
+    "clientVersion": "ethrex/v23.0.0-hegota-testnet-hotfix-4738681427f8c7d2953a91854f8418dc10ad1dc5/x86_64-unknown-linux-gnu/rustc-v1.93.1",
+    "capturedAt": "2026-10-07T09:08:34.324Z"
+  },
+  "tx": {
+    "blobVersionedHashes": [],
+    "blockHash": "0xd235b450793de2b3d2a3fcdb6df94ea662f5fad224e44cc0a20b950c705513eb",
+    "blockNumber": "0x4a66a",
+    "chainId": "0x1fcd",
+    "frames": [
+      {
+        "data": "0x",
+        "flags": "0x3",
+        "gasLimit": "0x7530",
+        "mode": "0x1",
+        "stateGasLimit": "0x0",
+        "to": null,
+        "value": "0x0"
+      },
+      {
+        "data": "0x",
+        "flags": "0x0",
+        "gasLimit": "0x7530",
+        "mode": "0x2",
+        "stateGasLimit": "0x0",
+        "to": "0xa93cee06b1e4ffacdf920bd500cb301a39ddeb74",
+        "value": "0x38d7ea4c68000"
+      }
+    ],
+    "from": "0x9fc3c4bed88b709eeee692f66c40083885c9e6e7",
+    "hash": "0x9dad46a4c06c8256700b36b001a32b1c86a1aa923ec307a4a3a9b0af25a11057",
+    "maxFeePerBlobGas": "0x0",
+    "maxFeePerGas": "0xf",
+    "maxPriorityFeePerGas": "0x1",
+    "nonceKeys": [
+      "0x0"
+    ],
+    "nonceSeq": "0x2",
+    "sender": "0x9fc3c4bed88b709eeee692f66c40083885c9e6e7",
+    "signatures": [
+      {
+        "msg": "0x",
+        "scheme": "0x1",
+        "signature": "0x01d4a5a77a00a984b1e17559541c02786aa39423fe4bea93da226a08d5f552c06600381bdecbe82932b3b163966297fbd9ad576f7df3f3f3bc3eaa60feadfcde33",
+        "signer": "0xfaa8cc726d885ad894650f6648cebd1cdbc746ad"
+      },
+      {
+        "msg": "0x",
+        "scheme": "0x2",
+        "signature": "0xc364579b470a5ef58cd2c60ea9d86442915d83adae2fb6b7cd8773eaa9f36ca511abe0b741aace39fa5174d8e24c87c0d4593cc3876b31d671a6dab1c8e0c4e359f7f9106d548cefd440ff19f8e51a4192ff139dd4ed4d426300f22c48bb41e3bce6cf5072a175766dd8a817008c21dc1642c0e20ce7728ac531c55ca3783a04",
+        "signer": "0xbe74379a52609c76e3535fba6eaf7337180273e5"
+      }
+    ],
+    "transactionIndex": "0x0",
+    "type": "0x6"
+  },
+  "receipt": {
+    "blockHash": "0xd235b450793de2b3d2a3fcdb6df94ea662f5fad224e44cc0a20b950c705513eb",
+    "blockNumber": "0x4a66a",
+    "contractAddress": null,
+    "cumulativeGasUsed": "0xaa22",
+    "effectiveGasPrice": "0x8",
+    "frameReceipts": [
+      {
+        "gasUsed": "0x4b7",
+        "logs": [],
+        "stateGasUsed": "0x0",
+        "status": "0x1"
+      },
+      {
+        "gasUsed": "0xbb8",
+        "logs": [
+          {
+            "address": "0xfffffffffffffffffffffffffffffffffffffffe",
+            "data": "0x00000000000000000000000000000000000000000000000000038d7ea4c68000",
+            "topics": [
+              "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+              "0x0000000000000000000000009fc3c4bed88b709eeee692f66c40083885c9e6e7",
+              "0x000000000000000000000000a93cee06b1e4ffacdf920bd500cb301a39ddeb74"
+            ]
+          }
+        ],
+        "stateGasUsed": "0x0",
+        "status": "0x1"
+      }
+    ],
+    "from": "0x9fc3c4bed88b709eeee692f66c40083885c9e6e7",
+    "gasUsed": "0xaa22",
+    "logs": [
+      {
+        "address": "0xfffffffffffffffffffffffffffffffffffffffe",
+        "blockHash": "0xd235b450793de2b3d2a3fcdb6df94ea662f5fad224e44cc0a20b950c705513eb",
+        "blockNumber": "0x4a66a",
+        "blockTimestamp": "0x6ac60bf1",
+        "data": "0x00000000000000000000000000000000000000000000000000038d7ea4c68000",
+        "logIndex": "0x0",
+        "removed": false,
+        "topics": [
+          "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+          "0x0000000000000000000000009fc3c4bed88b709eeee692f66c40083885c9e6e7",
+          "0x000000000000000000000000a93cee06b1e4ffacdf920bd500cb301a39ddeb74"
+        ],
+        "transactionHash": "0x9dad46a4c06c8256700b36b001a32b1c86a1aa923ec307a4a3a9b0af25a11057",
+        "transactionIndex": "0x0"
+      }
+    ],
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002100000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000002000000000000000000000000000000008000010000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040002000000000008000000000000000010000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000",
+    "payer": "0x9fc3c4bed88b709eeee692f66c40083885c9e6e7",
+    "status": "0x1",
+    "to": null,
+    "transactionHash": "0x9dad46a4c06c8256700b36b001a32b1c86a1aa923ec307a4a3a9b0af25a11057",
+    "transactionIndex": "0x0",
+    "type": "0x6"
+  }
+}
