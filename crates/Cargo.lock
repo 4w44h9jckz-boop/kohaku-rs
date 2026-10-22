@@ -4954,6 +4954,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "kohaku-frame-device-key"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "hex",
+ "kohaku-frame-accounts",
+ "kohaku-frame-kit",
+ "kohaku-frame-pool",
+ "kohaku-frame-registry",
+ "kohaku-tornadocash",
+ "p256 0.13.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "kohaku-frame-display"
 version = "0.1.0"
 dependencies = [
@@ -4963,6 +4980,22 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "kohaku-frame-enclave"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "hex",
+ "kohaku-frame-accounts",
+ "kohaku-frame-device-key",
+ "kohaku-frame-kit",
+ "kohaku-frame-pool",
+ "kohaku-frame-registry",
+ "p256 0.13.2",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
