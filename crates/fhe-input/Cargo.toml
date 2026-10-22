@@ -1,0 +1,19 @@
+[package]
+name = "kohaku-fhe-input"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Zama's proof of knowledge for TFHE compact public-key encryption, unmodified, pinned at the
+# tfhe-rs commit read for `exp-frames` experiment 41. BSD-3-Clause-Clear, which grants no
+# patent rights.
+tfhe-zk-pok = { git = "https://github.com/zama-ai/tfhe-rs", rev = "0a43e3cda269a1ef13690c99f2ce06b56bd9e43e" }
+rand08 = { package = "rand", version = "0.8" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+anyhow = { workspace = true }
