@@ -7,8 +7,10 @@
 //! ```
 //!
 //! `PRIVATE_KEY` pays the deposit (0.001 ETH plus gas); `RPC_URL` defaults to the testnet. The
-//! withdrawal is priced as experiment 30 priced it ([`chain::priced_withdrawal`], fees
-//! [`chain::WALLET_FEES`]). The note is printed to standard error before the deposit is sent, so
+//! withdrawal is priced by [`chain::priced_withdrawal`] with fees [`chain::WALLET_FEES`]: at the
+//! pool's default limits and the worst-case fee at them ([`Pricing::Uniform`]), the same limits
+//! and fee a withdrawal proved by a committee carries. `PRICING=tightened` prices it as
+//! experiment 30 did instead, from a simulated draft ([`Pricing::Tightened`]). The note is printed to standard error before the deposit is sent, so
 //! a deposit whose withdrawal fails can still be recovered.
 //!
 //! With `SEND_RPC_URL` set, the withdrawal is handed to that node alone with
@@ -27,7 +29,7 @@ use anyhow::{Context, ensure};
 use kohaku_frame_kit::{FrameSigner, FrameTx, gas::max_cost, json::FrameTxReceiptJson, rpc};
 use kohaku_frame_pool::{
     chain::{self, WALLET_FEES},
-    withdrawal::{DENOMINATION, FramePool, PoolMode, WithdrawalOpts, abi::FeeRefund},
+    withdrawal::{DENOMINATION, FramePool, PoolMode, Pricing, WithdrawalOpts, abi::FeeRefund},
 };
 use kohaku_tornadocash::Note;
 use rand::RngExt;
@@ -70,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
     let opts = WithdrawalOpts {
         root_slot: Some(deposited.slot),
         fees: WALLET_FEES,
+        pricing: pricing()?,
         ..WithdrawalOpts::new(chain_id)
     };
     let (tx, proof) = chain::priced_withdrawal(
@@ -145,6 +148,15 @@ async fn main() -> anyhow::Result<()> {
         (bound - charged) / receipt.effective_gas_price,
     );
     Ok(())
+}
+
+/// `PRICING`: `uniform` (the default) or `tightened`.
+fn pricing() -> anyhow::Result<Pricing> {
+    match env::var("PRICING").as_deref() {
+        Err(_) | Ok("uniform") => Ok(Pricing::Uniform),
+        Ok("tightened") => Ok(Pricing::Tightened),
+        Ok(other) => anyhow::bail!("PRICING={other}: uniform or tightened"),
+    }
 }
 
 /// Simulate, then send: to `SEND_RPC_URL` alone when it is set, else to `RPC_URL`. Either way the

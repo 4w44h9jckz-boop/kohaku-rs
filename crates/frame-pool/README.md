@@ -15,9 +15,20 @@ transaction that carries it. The contracts and the testnet measurements live in 
   refuses what the pool's `VERIFY` would refuse, including an execution limit under the pool's
   floor. The test rebuilds every withdrawal mined on the testnet byte for byte.
 - `chain`: the pool on a node. A deposit, the tree read back from `Deposit` events, and a
-  pool-paid withdrawal priced the way `exp-frames` experiment 30 priced one. It simulates, sets
-  each limit to a quarter over its use plus 5,000, and fixes the note's fee at the worst-case max
-  cost of that shape, every data byte non-zero, before the final proof.
+  pool-paid withdrawal priced as `WithdrawalOpts::pricing` says:
+  - `Pricing::Uniform`, the default: the pool's default limits, unchanged, and the worst-case max
+    cost of that shape as the note's fee, every data byte non-zero (`uniform_fee`). Nothing in
+    it depends on the withdrawal, so a withdrawal the wallet proves and one a proving committee
+    proves (`kohaku-witness-share`) carry the same limits and fee. A refund pool returns the
+    surplus; any other pool keeps it.
+  - `Pricing::Tightened`, `exp-frames` experiment 30's: it simulates a draft, sets each limit to
+    a quarter over its use plus 5,000, and fixes the fee at the worst-case max cost of that
+    shape, before the final proof. The fee is lower, but the limits and the fee follow the
+    simulation.
+
+  `tests/pricing.rs` checks both against the refund pool. Uniform gives 10,000 / 400,000 /
+  100,000 / 50,000 and a fee of 173,077,600,000,000 wei for any note. Tightened, from X1's use per
+  frame, gives 11,973 / 310,930 / 100,000 / 25,000 and 150,658,200,000,000 wei.
 
 `examples/keyed_withdrawal.rs` runs the whole flow against the testnet in Rust. An account
 deposits into the keyed pool, and the pool then withdraws to a fresh address with itself as
@@ -54,7 +65,8 @@ A run on 2026-10-20 put the deposit in block 477921
 and the withdrawal in block 477924
 ([`0x339af560...`](https://dora.privacy.ethrex.xyz/tx/0x339af560b79b175b240b4250809cc14e84b34799023cb2a847053bd2e7119659)),
 with no signature and the pool as payer. Priced at a 0.1 gwei tip and a 0.2 gwei max fee, as
-experiment 30 priced its own, it chose the same limits, 11,973 / 310,930 / 100,000 / 25,000
+experiment 30 priced its own, and with experiment 30's tightening (then the only pricing; now
+`PRICING=tightened`), it chose the same limits, 11,973 / 310,930 / 100,000 / 25,000
 execution, and the same fee, 150,658,200,000,000 wei. The withdrawal used 579,697 gas: 5,579 for
 the root check, 244,744 plus 97,920 state for the pool's `VERIFY`, 14,255 plus 183,600 state for
 the payout, and 11,531 for the refund. At 100,000,007 wei per gas the chain charged

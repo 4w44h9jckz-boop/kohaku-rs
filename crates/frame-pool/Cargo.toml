@@ -10,6 +10,7 @@ hex = { workspace = true }
 kohaku-frame-kit = { workspace = true }
 kohaku-merkle-tree = { workspace = true }
 kohaku-tornadocash = { workspace = true }
+kohaku-tornadocash-circuit = { workspace = true }
 rand = { workspace = true }
 ruint = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

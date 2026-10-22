@@ -205,6 +205,24 @@ pub fn worst_case_max_cost(tx: &FrameTx) -> Result<U256, UnknownScheme> {
     max_cost(&worst, 0)
 }
 
+/// How a pool-paid withdrawal's execution limits and fee are set ([`crate::chain::priced_withdrawal`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Pricing {
+    /// The pool's default limits, unchanged, and the worst-case fee at them
+    /// ([`crate::chain::uniform_fee`]). Nothing in it depends on this withdrawal, so it needs no
+    /// draft proof: a wallet that proves for itself and one that hands its witness to a committee
+    /// build the same limits and the same fee, and a node cannot tell the two apart by them. With
+    /// a refund pool the last frame returns what the gas did not use; elsewhere the note pays the
+    /// surplus.
+    #[default]
+    Uniform,
+    /// `exp-frames` experiment 30's: prove a draft at the uniform fee, simulate it, tighten each
+    /// frame's limit to a quarter over its use plus 5,000 ([`tightened_limits`]), and fix the fee
+    /// at the worst case of that shape. The fee is lower, but the limits and the fee follow this
+    /// withdrawal's simulation, and only a wallet that can prove a draft can set them.
+    Tightened,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithdrawalOpts {
     pub chain_id: u64,
@@ -220,6 +238,9 @@ pub struct WithdrawalOpts {
     /// [`tightened_limits`] of a simulation. Each must meet [`execution_floor`].
     pub execution_limits: Option<Vec<u64>>,
     pub fees: Fees,
+    /// How [`crate::chain::priced_withdrawal`] sets the limits and the fee; [`Pricing::Uniform`]
+    /// unless chosen.
+    pub pricing: Pricing,
 }
 
 impl WithdrawalOpts {
@@ -233,6 +254,7 @@ impl WithdrawalOpts {
             verify_execution: VERIFY_EXECUTION,
             execution_limits: None,
             fees: POOL_FEES,
+            pricing: Pricing::Uniform,
         }
     }
 }
