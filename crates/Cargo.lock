@@ -5040,6 +5040,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "kohaku-frame-exit"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "alloy",
+ "hex",
+ "hkdf",
+ "k256 0.13.4",
+ "kohaku-frame-secrets",
+ "rand 0.10.2",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "kohaku-frame-kit"
 version = "0.1.0"
 dependencies = [
