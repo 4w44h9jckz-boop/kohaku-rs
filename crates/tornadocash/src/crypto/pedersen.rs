@@ -31,7 +31,19 @@ const ORDER: U256 =
 /// 200 bits, encodes each segment as a signed-window scalar, multiplies by
 /// the corresponding generator point, and returns the x-coordinate of the
 /// accumulated point.
+#[must_use]
 pub fn pedersen_hash(data: &[u8]) -> Fr {
+    pedersen_point(data).x
+}
+
+/// The point [`pedersen_hash`] takes the x-coordinate of.
+///
+/// Each 4-bit window of `data` adds a term of its own to the point, so the point of `a || b` is
+/// the point of `a || 0` plus the point of `0 || b` less the point of `0 || 0`, when `a` ends on a
+/// window boundary. A party can then contribute part of a note's preimage as a point, without
+/// revealing it.
+#[must_use]
+pub fn pedersen_point(data: &[u8]) -> Point {
     let bits: Vec<bool> = (0..data.len() * 8).map(|i| test_bit(data, i)).collect();
     let n_segments = (bits.len().saturating_sub(1) / BITS_PER_SEGMENT) + 1;
 
@@ -53,7 +65,20 @@ pub fn pedersen_hash(data: &[u8]) -> Fr {
         acc = acc.projective().add(&contribution.projective()).affine();
     }
 
-    acc.x
+    acc
+}
+
+/// Pack a `BabyJubJub` point as circomlib's `packPoint` does: the y-coordinate little-endian,
+/// with the top bit of byte 31 set when x is above p/2. [`unpack_point`] reverses it.
+#[must_use]
+pub fn pack_point(p: &Point) -> [u8; 32] {
+    let (_, y) = fr_to_num_bigint(p.y).to_bytes_le();
+    let mut out = [0u8; 32];
+    out[..y.len()].copy_from_slice(&y);
+    if fr_to_num_bigint(p.x) > u256_to_num_bigint(Q) / 2u64 {
+        out[31] |= 0x80;
+    }
+    out
 }
 
 /// Encode a segment's bits as a signed scalar.
@@ -130,7 +155,8 @@ fn compute_base_point(point_idx: usize) -> Point {
 ///
 /// Bytes are a LE-encoded y-coordinate; the high bit of byte 31 is the sign of
 /// x (1 = x > p/2). Returns `None` if y ≥ p or x² has no square root.
-fn unpack_point(buff: &[u8; 32]) -> Option<Point> {
+#[must_use]
+pub fn unpack_point(buff: &[u8; 32]) -> Option<Point> {
     let mut y_bytes = *buff;
     let sign = y_bytes[31] & 0x80 != 0;
     y_bytes[31] &= 0x7f;
@@ -186,5 +212,28 @@ mod tests {
         .try_into()
         .unwrap();
         assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn a_preimage_split_at_a_window_boundary_adds_up() {
+        let n: Vec<u8> = (1..=31).collect();
+        let s: Vec<u8> = (101..=131).collect();
+        let z = [0u8; 31];
+        let cat = |a: &[u8], b: &[u8]| [a, b].concat();
+        let whole = pedersen_point(&cat(&n, &s));
+        let zero = pedersen_point(&cat(&z, &z));
+        let sum = pedersen_point(&cat(&n, &z))
+            .add(&pedersen_point(&cat(&z, &s)))
+            .add(&zero.neg());
+        assert_eq!(sum, whole);
+        assert_eq!(pedersen_hash(&cat(&n, &s)), whole.x);
+    }
+
+    #[test]
+    fn packing_round_trips() {
+        for data in [&b"Hello, world!"[..], &[7u8; 62][..], &[0u8; 62][..]] {
+            let p = pedersen_point(data);
+            assert_eq!(unpack_point(&pack_point(&p)), Some(p));
+        }
     }
 }

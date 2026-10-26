@@ -7,6 +7,7 @@ members = [
     "frame-device-key",
     "frame-enclave",
     "frame-display",
+    "frame-exit",
     "frame-kit",
     "frame-pool",
     "frame-registry",
@@ -63,6 +64,7 @@ kohaku-frame-accounts = { path = "frame-accounts" }
 kohaku-frame-device-key = { path = "frame-device-key" }
 kohaku-frame-enclave = { path = "frame-enclave" }
 kohaku-frame-display = { path = "frame-display" }
+kohaku-frame-exit = { path = "frame-exit" }
 kohaku-frame-kit = { path = "frame-kit" }
 kohaku-frame-pool = { path = "frame-pool" }
 kohaku-frame-registry = { path = "frame-registry" }

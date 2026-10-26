@@ -1,0 +1,26 @@
+[package]
+name = "kohaku-frame-exit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes-gcm = { workspace = true }
+alloy = { workspace = true }
+anyhow = { workspace = true }
+hex = { workspace = true }
+hkdf = { workspace = true }
+k256 = { workspace = true, features = ["arithmetic"] }
+kohaku-frame-kit = { workspace = true }
+kohaku-frame-pool = { workspace = true }
+kohaku-frame-secrets = { workspace = true }
+kohaku-tornadocash = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
