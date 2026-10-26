@@ -3,7 +3,7 @@ use ark_ff::{BigInteger, PrimeField};
 use num_bigint::{BigInt, Sign};
 use ruint::aliases::U256;
 
-mod babyjubjub;
+pub mod babyjubjub;
 pub mod mimc;
 mod mimc_constants;
 pub mod pedersen;

@@ -17,7 +17,11 @@ mod withdrawal;
 pub mod userop_provider;
 
 pub use asset::Asset;
-pub use crypto::mimc::mimc_sponge;
+pub use crypto::{
+    babyjubjub::Point as BabyJubJubPoint,
+    mimc::mimc_sponge,
+    pedersen::{pack_point, pedersen_hash, pedersen_point, unpack_point},
+};
 pub use deposit::Deposit;
 pub use field::Field;
 pub use note::{Note, NoteError, NoteString, Nullifier, Secret};

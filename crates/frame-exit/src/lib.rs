@@ -5,8 +5,9 @@
 //! opening, sealed to the note's owner. If the vault's queue stalls, the owner finds its latest
 //! opening and redeems the note alone.
 //!
-//! This first part is the key, the sealing and the scan. Nothing in it depends on what an opening
-//! holds, which waits on the owner's decision about who knows which part of a note's secret.
+//! Here: the owner's keys and the sealing (this module), what an opening holds and how the owner
+//! checks it ([`note`]), the intent a holder sends for the owner ([`intent`]), and the vault on
+//! chain ([`vault`]).
 //!
 //! **The key.** From the owner's one seed (`kohaku-frame-secrets`):
 //!
@@ -46,11 +47,16 @@ use k256::{
 use kohaku_frame_secrets::derive::{DeriveError, Seed};
 use sha2::Sha256;
 
+pub mod intent;
+pub mod note;
+pub mod vault;
+
 /// The sealing's version byte.
 pub const VERSION: u8 = 0x02;
 /// HKDF's info for an opening's key and nonce.
 pub const INFO: &[u8] = b"x9/opening";
-/// Every opening's plaintext length. Provisional: set when the opening's contents are agreed.
+/// Every opening's plaintext length: one member's part of a note's nullifier and where it goes
+/// ([`note::Part`]).
 pub const OPENING_LEN: usize = 48;
 /// Version, view tag, ephemeral key and the GCM tag around an opening.
 pub const OVERHEAD: usize = 2 + 33 + 16;
@@ -116,7 +122,7 @@ impl OpeningKey {
     }
 }
 
-fn vault_label(vault: Address) -> String {
+pub(crate) fn vault_label(vault: Address) -> String {
     format!("0x{}", hex::encode(vault))
 }
 
@@ -161,10 +167,10 @@ fn shared(secret: &B256, public: &[u8; 33]) -> Result<[u8; 32], ExitError> {
     Ok((*x.raw_secret_bytes()).into())
 }
 
-fn cipher(shared: &[u8; 32], ephemeral: &[u8; 33]) -> (Aes256Gcm, [u8; 12]) {
+fn cipher(shared: &[u8; 32], ephemeral: &[u8; 33], info: &[u8]) -> (Aes256Gcm, [u8; 12]) {
     let mut okm = [0u8; 44];
     Hkdf::<Sha256>::new(Some(ephemeral), shared)
-        .expand(INFO, &mut okm)
+        .expand(info, &mut okm)
         .expect("44 bytes is a valid HKDF-SHA256 length");
     let cipher = Aes256Gcm::new_from_slice(&okm[..32]).expect("a 32-byte key");
     let mut iv = [0u8; 12];
@@ -172,37 +178,41 @@ fn cipher(shared: &[u8; 32], ephemeral: &[u8; 33]) -> (Aes256Gcm, [u8; 12]) {
     (cipher, iv)
 }
 
-/// Seals `opening` to `to` under `context`, with the fresh key `ephemeral`.
-pub fn seal(
+/// The scheme under any label: `VERSION || view tag || E || AES-256-GCM(plaintext, aad) || tag`.
+pub(crate) fn seal_with(
+    info: &[u8],
     to: &[u8; 33],
-    context: &Context,
-    opening: &[u8; OPENING_LEN],
+    aad: &[u8],
+    plaintext: &[u8],
     ephemeral: &OpeningKey,
-) -> Result<[u8; MESSAGE_LEN], ExitError> {
+) -> Result<Vec<u8>, ExitError> {
     let s = shared(&ephemeral.secret, to)?;
-    let (c, iv) = cipher(&s, &ephemeral.public);
+    let (c, iv) = cipher(&s, &ephemeral.public, info);
     let body = c
         .encrypt(
             &Nonce::from(iv),
             Payload {
-                msg: opening,
-                aad: &context.aad(),
+                msg: plaintext,
+                aad,
             },
         )
         .map_err(|_| ExitError::Seal)?;
-    let mut out = [0u8; MESSAGE_LEN];
-    out[0] = VERSION;
-    out[1] = keccak256(s)[0];
-    out[2..35].copy_from_slice(&ephemeral.public);
-    out[35..].copy_from_slice(&body);
+    let mut out = Vec::with_capacity(OVERHEAD + plaintext.len());
+    out.push(VERSION);
+    out.push(keccak256(s)[0]);
+    out.extend_from_slice(&ephemeral.public);
+    out.extend_from_slice(&body);
     Ok(out)
 }
 
-/// Opens `message` with `key` under `context`, or `None` if it is not for `key`, not for this
-/// context, or malformed. A wrong view tag ends it before any decryption.
-#[must_use]
-pub fn open(key: &OpeningKey, context: &Context, message: &[u8]) -> Option<[u8; OPENING_LEN]> {
-    if message.len() != MESSAGE_LEN || message[0] != VERSION {
+pub(crate) fn open_with(
+    info: &[u8],
+    key: &OpeningKey,
+    aad: &[u8],
+    message: &[u8],
+    len: usize,
+) -> Option<Vec<u8>> {
+    if message.len() != len + OVERHEAD || message[0] != VERSION {
         return None;
     }
     let ephemeral: [u8; 33] = message[2..35].try_into().ok()?;
@@ -210,17 +220,44 @@ pub fn open(key: &OpeningKey, context: &Context, message: &[u8]) -> Option<[u8; 
     if keccak256(s)[0] != message[1] {
         return None;
     }
-    let (c, iv) = cipher(&s, &ephemeral);
-    let plain = c
-        .decrypt(
-            &Nonce::from(iv),
-            Payload {
-                msg: &message[35..],
-                aad: &context.aad(),
-            },
-        )
-        .ok()?;
-    plain.try_into().ok()
+    let (c, iv) = cipher(&s, &ephemeral, info);
+    c.decrypt(
+        &Nonce::from(iv),
+        Payload {
+            msg: &message[35..],
+            aad,
+        },
+    )
+    .ok()
+}
+
+/// Seals `opening` to `to` under `context`, with the fresh key `ephemeral`.
+///
+/// # Errors
+///
+/// If `to` is not a compressed secp256k1 public key.
+///
+/// # Panics
+///
+/// Never: a fixed-length plaintext seals to a fixed-length message.
+pub fn seal(
+    to: &[u8; 33],
+    context: &Context,
+    opening: &[u8; OPENING_LEN],
+    ephemeral: &OpeningKey,
+) -> Result<[u8; MESSAGE_LEN], ExitError> {
+    let m = seal_with(INFO, to, &context.aad(), opening, ephemeral)?;
+    Ok(m.try_into()
+        .expect("a fixed-length plaintext gives a fixed-length message"))
+}
+
+/// Opens `message` with `key` under `context`, or `None` if it is not for `key`, not for this
+/// context, or malformed. A wrong view tag ends it before any decryption.
+#[must_use]
+pub fn open(key: &OpeningKey, context: &Context, message: &[u8]) -> Option<[u8; OPENING_LEN]> {
+    open_with(INFO, key, &context.aad(), message, OPENING_LEN)?
+        .try_into()
+        .ok()
 }
 
 /// One update's published openings, in the order the vault emitted them.
