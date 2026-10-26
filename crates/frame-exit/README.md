@@ -76,18 +76,36 @@ Any failure is a garbage opening (`Garbage`), found the day it is published.
 
 ## The vault (`vault`)
 
-The vault's interface as the committee's builders described it, provisional until their ABI file
-lands:
+The committee's `ExitVault` (`exp-e2e-frames` experiment 14, `contracts/ExitVault.abi.json`), in
+the part an owner and a holder use:
 - `published` and `latest_note` read every update's openings, newest first, and the owner's
   latest note with any garbage found on the way.
 - `redemption` is the refund pool's withdrawal (`kohaku-frame-pool`): uniform pricing, the vault
-  as sender and payer, the nullifier hash as the only nonce key, at nonce sequence 0, 1 or 2.
+  as sender and payer, the nullifier hash as the only nonce key, at nonce sequence 0, 1 or 2. The
+  withdraw frame's state budget is `WITHDRAW_STATE` = 183,600 + 2 x 97,920 = 379,440 (the
+  recipient's new account, the spent slot, and the mode slot on the vault's first redemption),
+  and the fee is priced with it. It proves against the whole tree (`all_leaves`), whose root is
+  `getLastRoot()`, at the slot of the last `RecentRoot` log naming it (`root_slot`).
+- `pool` checks the EIP-8272 salt against `sourceId()`; `committee_key` reads the compressed key
+  from `committeeKey()`'s two words; `tail`, `mode` and `last_root` read the views.
 - `redeem` hands it to one node and awaits it on the chain. It reports `Paid`, `PaidNothing` or
   `Refused` with the node's words. `PaidNothing` means mined with `withdraw` reverted, before
   escape mode; the next sequence may try again.
 
 `kohaku-tornadocash` gains `pedersen_point`, `pack_point`, `unpack_point`, and `Point::add` and
 `neg`, so that `B(s)` and the commitment's point can be computed. `pedersen_hash` is unchanged.
+
+## The runner's steps (`examples/`)
+
+One example per step. Each reads the environment (or `--name value`) and prints one JSON line of
+hashes, verdicts and outcomes. None prints a key, the seed, `s`, a part or an opening.
+
+| Example | Who | Inputs | Prints |
+|---|---|---|---|
+| `exit_receive` | owner | `SEED_FILE`, `VAULT`, `O`, `J`, `RECEIVE_FILE` | the address's digest and the recipient; the address goes to `RECEIVE_FILE` (0600) for the holder |
+| `exit_intent` | holder | `PRIVATE_KEY` (environment only), `VAULT`, `RECEIVE_FILE`, `SEND_RPC_URL`, `RPC_URL` | the index (`tail()`), the intent's hash, the transaction; fails if another intent took the index |
+| `exit_check` | owner | `SEED_FILE`, `VAULT`, `O`, `J`, `RPC_URL` | the verdict, leaf, update, commitment and mode; exit 2 on garbage with its kind, 3 with none |
+| `exit_redeem` | owner | `SEED_FILE`, `VAULT`, `SALT`, `O`, `J`, `SEQ`, `SEND_RPC_URL`, `RPC_URL` | the hash, nullifier hash, fee and `Paid`, `PaidNothing` or `Refused`; exit 2 on garbage, 3 with none, 1 if refused |
 
 ## Tests
 
@@ -107,3 +125,7 @@ lands:
   - the members' windows partition the nullifier;
   - the redemption at each sequence: vault-sent, unsigned, keyed by the nullifier hash, over the
     right root, and refused past sequence 2.
+- `tests/committee.rs`: the committee's own vectors (`tests/fixtures/committee.json`, a copy of
+  `exp-e2e-frames` `test/fixtures/x9/vectors.json`, fake keys from a seed): its sealed intent opens
+  to the owner's key and `B(s)`, its three openings assemble to the nullifier at leaf 9 for update
+  5 only, and the note makes its commitment.

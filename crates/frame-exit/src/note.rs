@@ -162,6 +162,23 @@ pub enum Garbage {
     Commitment(u32),
 }
 
+impl Garbage {
+    /// The kind, as a word a record can carry.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Garbage::Length(_) => "length",
+            Garbage::Parts(_) => "parts",
+            Garbage::Malformed(_) => "malformed",
+            Garbage::Member { .. } => "member",
+            Garbage::Windows(_) => "windows",
+            Garbage::Disagree => "disagree",
+            Garbage::Update { .. } => "update",
+            Garbage::Commitment(_) => "commitment",
+        }
+    }
+}
+
 /// The owner's view of a note from one update's openings: its nullifier, assembled, and where
 /// the note sits. `Debug` shows the leaf and update only.
 #[derive(Clone, PartialEq, Eq)]

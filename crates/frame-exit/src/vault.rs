@@ -1,19 +1,20 @@
 //! The vault on chain, from the owner's side: its published openings, the owner's latest note,
 //! and the redemption, the vault being its sender and payer.
 //!
-//! The interface is the one the committee's builders described for X9. It is provisional until
-//! their ABI file lands with the contract, before the first transaction:
+//! The interface is the committee's `ExitVault` (`exp-e2e-frames` experiment 14,
+//! `contracts/ExitVault.abi.json`), in the part the owner and a holder use:
 //!
 //! ```text
 //! deposit(bytes32 commitment) payable    the refund pool's, with its Deposit and RecentRoot events
-//! enqueue(bytes sealed)                  event Intent(uint256 index, bytes sealed)
+//! enqueue(bytes sealed)                  event Intent(uint256 index, bytes sealed); index = tail()
 //! update (a frame transaction)           event Opening(uint256 updateNumber, bytes openings)
 //! withdraw(...)                          the refund pool's, in its frames
-//! mode(), since(), committeeKey()
+//! mode(), since(), tail(), nextIndex(), getLastRoot(), sourceId(), committeeKey()
 //! ```
 //!
 //! A redemption is the refund pool's withdrawal byte for byte (`kohaku-frame-pool`), priced
-//! uniformly, with the nullifier hash as its only nonce key. Its `VERIFY` cannot read the time, so
+//! uniformly, with the nullifier hash as its only nonce key, and one change: the withdraw frame's
+//! state budget is [`WITHDRAW_STATE`], since the vault writes more than the refund pool. Its `VERIFY` cannot read the time, so
 //! the vault's `withdraw` frame does: before `T` blocks of a stalled queue it reverts and pays
 //! nothing, and the note's nonce sequence has moved on. The vault accepts sequences 0 to 2, so an
 //! owner may try again ([`Outcome::PaidNothing`]).
@@ -21,7 +22,7 @@
 use std::time::Duration;
 
 use alloy::{
-    primitives::{Address, B256, U256},
+    primitives::{Address, B256, Bytes, U256},
     providers::Provider,
     rpc::types::Filter,
     sol_types::SolEvent,
@@ -29,17 +30,24 @@ use alloy::{
 use anyhow::{Context as _, ensure};
 use kohaku_frame_kit::{FrameTx, rpc};
 use kohaku_frame_pool::{
-    FramePoolProof,
-    chain::{self, uniform_withdrawal},
-    withdrawal::{FramePool, WithdrawalOpts, abi::RecentRoot},
+    FramePoolProof, PublicInputs, chain, prove,
+    withdrawal::{
+        FramePool, PoolMode, Pricing, WithdrawalOpts, abi::RecentRoot, withdrawal_tx,
+        worst_case_max_cost,
+    },
 };
-use kohaku_tornadocash::{Field, Note, Secret};
+use kohaku_tornadocash::{Field, Note, Payer, Secret};
 use rand::CryptoRng;
 
 use crate::{
     Context, OpeningKey,
     note::{Garbage, Opening, assemble, check},
 };
+
+/// The withdraw frame's state budget: the recipient's new account (183,600), the note's spent slot
+/// (97,920) and, on the vault's first redemption, its packed mode slot (97,920). The committee's
+/// builders measured 379,440 for a first redemption and 281,520 for a second on a local ethrex.
+pub const WITHDRAW_STATE: u64 = 183_600 + 2 * 97_920;
 
 /// The highest nonce sequence the vault accepts for a redemption: two retries after a try that
 /// came too early.
@@ -50,9 +58,15 @@ pub mod abi {
         event Opening(uint256 updateNumber, bytes openings);
         event Intent(uint256 index, bytes sealed);
         function enqueue(bytes sealed);
-        function mode() view returns (uint8);
+        function mode() view returns (uint256);
         function since() view returns (uint256);
-        function committeeKey() view returns (bytes);
+        function tail() view returns (uint256);
+        function nextIndex() view returns (uint256);
+        function spent(bytes32 nullifierHash) view returns (uint256);
+        /// The compressed key, 33 bytes: the first 32, then byte 33 at the start of the second word.
+        function committeeKey() view returns (bytes32, bytes32);
+        function getLastRoot() view returns (bytes32);
+        function sourceId() view returns (bytes32);
     }
 }
 
@@ -161,9 +175,117 @@ pub fn redemption(
         sequence <= MAX_SEQUENCE,
         "the vault accepts sequences 0 to {MAX_SEQUENCE}"
     );
-    let (mut tx, proof) = uniform_withdrawal(vault, note, leaves, recipient, opts, rng)?;
-    tx.nonce_seq = sequence;
+    // Uniform pricing (the pool's default limits, the worst-case fee of that shape), with the
+    // vault's state budget in the shape the fee is priced from.
+    let opts = WithdrawalOpts {
+        sponsor: None,
+        execution_limits: None,
+        pricing: Pricing::Uniform,
+        ..opts.clone()
+    };
+    let shaped = |inputs: &PublicInputs, proof: &Bytes| -> anyhow::Result<FrameTx> {
+        let mut tx = withdrawal_tx(vault, inputs, proof, &opts)?;
+        tx.frames[2].limits.state = WITHDRAW_STATE;
+        tx.nonce_seq = sequence;
+        Ok(tx)
+    };
+    let shape = PublicInputs {
+        root: B256::ZERO,
+        nullifier_hash: B256::ZERO,
+        recipient,
+        relayer: vault.address,
+        fee: U256::MAX,
+        refund: U256::ZERO,
+    };
+    let fee = worst_case_max_cost(&shaped(&shape, &Bytes::from(vec![0; 256]))?)?;
+    let payer = Payer {
+        address: vault.address,
+        fee,
+        refund: U256::ZERO,
+    };
+    let proof = prove(note.clone(), leaves, recipient, payer, rng)?;
+    let tx = shaped(&proof.inputs, &proof.proof)?;
     Ok((tx, proof))
+}
+
+async fn call<P: Provider, C: alloy::sol_types::SolCall>(
+    provider: &P,
+    vault: Address,
+    call: &C,
+) -> anyhow::Result<Bytes> {
+    Ok(provider
+        .call(
+            alloy::rpc::types::TransactionRequest::default()
+                .to(vault)
+                .input(call.abi_encode().into()),
+        )
+        .await?)
+}
+
+async fn word<P: Provider, C: alloy::sol_types::SolCall>(
+    provider: &P,
+    vault: Address,
+    c: &C,
+) -> anyhow::Result<B256> {
+    let out = call(provider, vault, c).await?;
+    ensure!(out.len() == 32, "a view returned {} bytes", out.len());
+    Ok(B256::from_slice(&out))
+}
+
+/// The vault as the refund pool's withdrawal sees it, with the EIP-8272 salt its roots are filed
+/// under, checked against its `sourceId()`.
+pub async fn pool<P: Provider>(
+    provider: &P,
+    vault: Address,
+    salt: B256,
+) -> anyhow::Result<FramePool> {
+    let pool = FramePool {
+        address: vault,
+        mode: PoolMode::Refund,
+        salt,
+    };
+    ensure!(
+        word(provider, vault, &abi::sourceIdCall {}).await? == pool.source_id(),
+        "the salt does not make the vault's sourceId()"
+    );
+    Ok(pool)
+}
+
+/// The vault's latest root, `getLastRoot()`.
+pub async fn last_root<P: Provider>(provider: &P, vault: Address) -> anyhow::Result<B256> {
+    word(provider, vault, &abi::getLastRootCall {}).await
+}
+
+/// The index the next intent takes, `tail()`.
+pub async fn tail<P: Provider>(provider: &P, vault: Address) -> anyhow::Result<u64> {
+    Ok(U256::from_be_bytes(word(provider, vault, &abi::tailCall {}).await?.0).to::<u64>())
+}
+
+/// The vault's mode, `mode()`: 0 normal, 1 escape.
+pub async fn mode<P: Provider>(provider: &P, vault: Address) -> anyhow::Result<u64> {
+    Ok(U256::from_be_bytes(word(provider, vault, &abi::modeCall {}).await?.0).to::<u64>())
+}
+
+/// The vault's leaves, all of them: a redemption proves against the latest root, since every
+/// update files a new one.
+pub async fn all_leaves<P: Provider>(provider: &P, vault: Address) -> anyhow::Result<Vec<Field>> {
+    let next =
+        U256::from_be_bytes(word(provider, vault, &abi::nextIndexCall {}).await?.0).to::<usize>();
+    ensure!(next > 0, "the vault holds no notes");
+    Ok(chain::leaves(provider, vault, next - 1).await?)
+}
+
+/// The committee's sealing key, from `committeeKey()`.
+pub async fn committee_key<P: Provider>(provider: &P, vault: Address) -> anyhow::Result<[u8; 33]> {
+    let out = call(provider, vault, &abi::committeeKeyCall {}).await?;
+    ensure!(
+        out.len() == 64,
+        "committeeKey() returned {} bytes",
+        out.len()
+    );
+    let mut key = [0u8; 33];
+    key.copy_from_slice(&out[..33]);
+    Ok(key)
 }
 
 /// What became of a redemption.
