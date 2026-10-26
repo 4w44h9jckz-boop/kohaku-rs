@@ -309,6 +309,8 @@ fn the_windows_partition_the_nullifier() {
 }
 
 #[test]
+// The Groth16 prover overflows a debug build's stack.
+#[cfg_attr(debug_assertions, ignore = "run with `cargo test --release -- --ignored`")]
 fn the_redemption_is_the_refund_pools_withdrawal_at_the_chosen_sequence() {
     let seed = seed();
     let address = receive(&seed, VAULT, 0, 0).unwrap();
