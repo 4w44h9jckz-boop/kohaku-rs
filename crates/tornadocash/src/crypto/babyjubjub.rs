@@ -7,7 +7,7 @@ use crate::crypto::test_bit;
 pub(crate) const A: u64 = 168_700;
 pub(crate) const D: u64 = 168_696;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Point {
     pub x: Fr,
     pub y: Fr,
@@ -21,6 +21,7 @@ pub struct PointProjective {
 }
 
 impl Point {
+    #[must_use]
     pub fn projective(&self) -> PointProjective {
         PointProjective {
             x: self.x,
@@ -29,6 +30,22 @@ impl Point {
         }
     }
 
+    /// The sum of two points.
+    #[must_use]
+    pub fn add(&self, q: &Point) -> Point {
+        self.projective().add(&q.projective()).affine()
+    }
+
+    /// The inverse: (-x, y) on a twisted Edwards curve.
+    #[must_use]
+    pub fn neg(&self) -> Point {
+        Point {
+            x: -self.x,
+            y: self.y,
+        }
+    }
+
+    #[must_use]
     pub fn mul_scalar(&self, n: &NumBigInt) -> Point {
         // double-and-add (same as reference)
 

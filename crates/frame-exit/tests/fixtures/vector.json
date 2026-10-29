@@ -1,0 +1,22 @@
+{
+  "keys": [
+    {
+      "o": 0,
+      "openingPublic": "0x02d3673d8b02fb988d39a2844e555e6c75ddcf32425887d8f5fef473732432b475",
+      "recipient": "0xA700B52A97999A8F7B2c2544952A141AA9F89b30"
+    },
+    {
+      "o": 1,
+      "openingPublic": "0x035215742e73affffe8e9ba5635370535aa05b8de5286a801d7e9cabbf8034739b",
+      "recipient": "0xdF17227f96211E80237Ffe38b24E48975727EA54"
+    }
+  ],
+  "phrase": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+  "seal": {
+    "ephemeralSecret": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "message": "0x023b034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aae00b1391e44b05b70e1987598d73477a46c6de43f99661b3b5fcb77f6487fa9f7c728feb8c2a58f80113964a2772588262101ce7b00d33bbf601b669817bfb40",
+    "plaintext": "0xa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf",
+    "update": 7
+  },
+  "vault": "0x7Bc7902c7DEABFbD7Abd783C49BA7Bf946D13314"
+}
