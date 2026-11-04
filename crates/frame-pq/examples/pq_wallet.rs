@@ -13,6 +13,14 @@
 //!
 //! Build with `RUSTFLAGS="-C target-cpu=native"` for comparable times.
 //!
+//! On a chain that runs EIP-8288 (the patched ethrex of `exp-e2e-frames` experiment 19, as
+//! written): `CARRIER=dependency` deploys every account and the paymaster to read their triples
+//! from a dependency frame, which each transaction then carries; `WITNESS_DIR` is the node's
+//! `X14_WITNESS_DIR`, where each signature is handed in before its transaction; and with
+//! `PRIVATE_KEY` unset the funder is the leanSPHINCS account `sphincs/funder`, which the genesis
+//! funds (`MODE=addresses` prints it). `BOARD` and `POOL` override experiment 33's board and
+//! experiment 06's keyed pool. `SEND_COPY_A=1` also sends arm 5's raised-fee copy.
+//!
 //! `MODE=new` writes a fresh mnemonic to `SEED_FILE` (mode 0600). `MODE=signer` (arm 1) times key
 //! generation, signing and verification. `MODE=account` (arm 2): the funder deploys account 0
 //! with owner `sphincs/account/0/owner/0` and funds it; the account posts to the board under
@@ -49,7 +57,7 @@ use alloy::{
     sol_types::SolCall,
 };
 use anyhow::{Context, ensure};
-use common::{BOARD, TICKET_PRICE, TIP, executed, refused, send};
+use common::{TICKET_PRICE, TIP, executed, refused};
 use commonware_codec::Encode;
 use commonware_cryptography::bls12381::primitives::{
     group::G1,
@@ -76,7 +84,7 @@ use kohaku_frame_pq::{
     PUBLIC_KEY_LEN, SIGNATURE_LEN, SphincsKey,
     account::{
         Acting, Carrier, FRESH_SLOT_STATE_GAS, Fresh, Role, SphincsAccount, SphincsSender, Witness,
-        commitment, witnesses,
+        commitment, declare, witnesses,
     },
     binder, envelope, owner, recipient,
     seal::{self, SealKey},
@@ -162,6 +170,99 @@ fn signer() -> anyhow::Result<()> {
     write_record(&record)
 }
 
+/// Where the triples travel: `CARRIER=modelled` (the default, the test network's records) or
+/// `CARRIER=dependency` (a dependency frame, on a chain that runs EIP-8288).
+fn carrier() -> anyhow::Result<Carrier> {
+    match env::var("CARRIER").as_deref() {
+        Err(_) | Ok("" | "modelled") => Ok(Carrier::Modelled),
+        Ok("dependency") => Ok(Carrier::Dependency),
+        Ok(other) => anyhow::bail!("CARRIER {other}?"),
+    }
+}
+
+/// Experiment 33's board, or `BOARD`.
+fn board_address() -> anyhow::Result<Address> {
+    Ok(env::var("BOARD").ok().filter(|b| !b.is_empty()).map_or(Ok(common::BOARD), |b| b.parse())?)
+}
+
+/// Experiment 06's keyed pool, or `POOL`.
+fn keyed_pool() -> anyhow::Result<Address> {
+    Ok(env::var("POOL").ok().filter(|b| !b.is_empty()).map_or(Ok(KEYED_POOL), |b| b.parse())?)
+}
+
+/// Make `keys` authorise `tx`: with the dependency carrier, put their triples in a dependency
+/// frame; then sign the final signature hash with each, check each signature, and hand the
+/// witnesses to the node when `WITNESS_DIR` is set.
+fn authorise(tx: &mut FrameTx, keys: &[&SphincsKey]) -> anyhow::Result<Vec<Witness>> {
+    if carrier()? == Carrier::Dependency {
+        declare(tx, keys);
+    }
+    let w = witnesses(tx, keys)?;
+    hand_in(&w)?;
+    Ok(w)
+}
+
+/// Each witness as the patched node reads it: `WITNESS_DIR/w-<key>.json`, where `<key>` is
+/// keccak256(0x10 || the signature hash || the public key), the dependency as the node resolves
+/// it. A signature is not secret; the files stay outside any repository.
+fn hand_in(w: &[Witness]) -> anyhow::Result<()> {
+    let Some(dir) = env::var("WITNESS_DIR").ok().filter(|d| !d.is_empty()) else {
+        return Ok(());
+    };
+    for x in w {
+        let key = keccak256([&[0x10u8][..], x.message.as_slice(), x.key.as_slice()].concat());
+        let body = json!({
+            "publicKey": x.key,
+            "signature": format!("0x{}", common::hex(&x.signature)),
+            "message": x.message,
+        });
+        fs::write(std::path::Path::new(&dir).join(format!("w-{}.json", common::hex(key.as_slice()))), body.to_string())?;
+    }
+    Ok(())
+}
+
+/// Who pays: the testnet's funder (`PRIVATE_KEY`, secp256k1, which only funds), or, when
+/// `PRIVATE_KEY` is unset, a leanSPHINCS account `sphincs/funder` that the chain's genesis funds
+/// and that deploys itself on its first transaction.
+enum Funder {
+    Eoa(PrivateKeySigner),
+    Pq { key: SphincsKey, sender: SphincsSender },
+}
+
+impl Funder {
+    fn load(seed: &Seed) -> anyhow::Result<Self> {
+        if let Some(k) = env::var("PRIVATE_KEY").ok().filter(|k| !k.is_empty()) {
+            return Ok(Funder::Eoa(PrivateKeySigner::from_bytes(&k.parse()?)?));
+        }
+        let key = SphincsKey::derive(seed, "sphincs/funder");
+        let sender = fresh(seed, "sphincs/funder", &key)?;
+        Ok(Funder::Pq { key, sender })
+    }
+
+    fn address(&self) -> Address {
+        match self {
+            Funder::Eoa(k) => k.address(),
+            Funder::Pq { sender, .. } => sender.address(),
+        }
+    }
+
+    async fn send<P: Provider>(&self, provider: &P, calls: Vec<Frame>, what: &str) -> anyhow::Result<Value> {
+        match self {
+            Funder::Eoa(k) => common::send(provider, k, calls, what).await,
+            Funder::Pq { key, sender } => {
+                let deploy = provider.get_code_at(sender.address()).await?.is_empty();
+                let f = Fresh { sender, key, deploy };
+                let envelope = Envelope::fetch(provider, sender.address(), vec![U256::ZERO], TIP).await?;
+                let mut tx = TxPlan::new(&f).calls(calls).build(&envelope)?;
+                let w = authorise(&mut tx, &[key])?;
+                let mut s = mined(provider, &tx, what).await?;
+                s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
+                Ok(s)
+            }
+        }
+    }
+}
+
 /// [`executed`], and each frame's gas and status.
 async fn mined<P: Provider>(provider: &P, tx: &FrameTx, what: &str) -> anyhow::Result<Value> {
     let mut v = executed(provider, tx, what).await?;
@@ -182,7 +283,7 @@ fn account0(seed: &Seed, owner_key: &SphincsKey) -> SphincsAccount {
         commitment: B256::ZERO,
         delay: DELAY,
         lower_bound: false,
-        carrier: Carrier::Modelled,
+        carrier: carrier().expect("CARRIER"),
         salt: B256::from(seed.key("sphincs/account/0/salt")),
     }
 }
@@ -194,24 +295,23 @@ async fn acting_tx<P: Provider>(
     message: &[u8],
 ) -> anyhow::Result<(FrameTx, Vec<Witness>)> {
     let envelope = Envelope::fetch(provider, acting.account.address(), vec![U256::ZERO], TIP).await?;
-    let tx = TxPlan::new(acting).call(post_frame(BOARD, message)).build(&envelope)?;
-    let w = witnesses(&tx, &acting.keys())?;
+    let mut tx = TxPlan::new(acting).call(post_frame(board_address()?, message)).build(&envelope)?;
+    let w = authorise(&mut tx, &acting.keys())?;
     Ok((tx, w))
 }
 
 /// Arm 2: the account.
 async fn account<P: Provider>(provider: &P) -> anyhow::Result<()> {
     let seed = load_seed()?;
-    let funder = PrivateKeySigner::from_bytes(&env::var("PRIVATE_KEY").context("PRIVATE_KEY")?.parse()?)?;
+    let funder = Funder::load(&seed)?;
     let owner0 = owner(&seed, 0, 0);
     let owner1 = owner(&seed, 0, 1);
     let acct = account0(&seed, &owner0);
     let mut steps = vec![];
     if provider.get_code_at(acct.address()).await?.is_empty() {
         steps.push(
-            send(
+            funder.send(
                 provider,
-                &funder,
                 vec![
                     acct.deploy_frame(),
                     Frame::sender(Some(acct.address()))
@@ -257,7 +357,7 @@ const POOL_VERIFY: u64 = 260_000;
 
 fn pool() -> FramePool {
     FramePool {
-        address: KEYED_POOL,
+        address: keyed_pool().expect("POOL"),
         mode: PoolMode::Keyed,
         salt: keccak256("exp-frames/06/pool-keyed"),
     }
@@ -273,12 +373,12 @@ impl Sponsor for PqSponsor {
 }
 
 /// A fresh sender or recipient, as this experiment deploys it on the test network.
-fn fresh(seed: &Seed, label: &str, key: &SphincsKey) -> SphincsSender {
-    SphincsSender {
+fn fresh(seed: &Seed, label: &str, key: &SphincsKey) -> anyhow::Result<SphincsSender> {
+    Ok(SphincsSender {
         key: key.public_key(),
-        carrier: Carrier::Modelled,
+        carrier: carrier()?,
         salt: B256::from(seed.key(&format!("{label}/salt"))),
-    }
+    })
 }
 
 /// What the issuers do with one blinded point. The request is signed by account 0's owner key
@@ -325,9 +425,9 @@ async fn withdrawal<P: Provider>(
     fees: Fees,
 ) -> anyhow::Result<FrameTx> {
     let p = pool();
-    let leaves = kohaku_frame_pool::chain::leaves(provider, KEYED_POOL, leaf).await?;
+    let leaves = kohaku_frame_pool::chain::leaves(provider, p.address, leaf).await?;
     let root = B256::from(MerkleTree::from_leaves(&leaves)?.root()?);
-    let slot = root_slot(provider, KEYED_POOL, deposit_block, root)
+    let slot = root_slot(provider, p.address, deposit_block, root)
         .await?
         .context("no EIP-8272 slot for the root")?;
     let payer = Payer { address: pay.target.context("a paymaster")?, fee: U256::ZERO, refund: U256::ZERO };
@@ -359,7 +459,7 @@ async fn withdrawal<P: Provider>(
 #[allow(clippy::many_single_char_names)]
 async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
     let seed = load_seed()?;
-    let funder = PrivateKeySigner::from_bytes(&env::var("PRIVATE_KEY").context("PRIVATE_KEY")?.parse()?)?;
+    let funder = Funder::load(&seed)?;
     let chain_id = provider.get_chain_id().await?;
     let owner0 = owner(&seed, 0, 0);
     let acct = account0(&seed, &owner0);
@@ -373,9 +473,8 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
 
     // 1. A committee, its paymaster, two tickets bought and a note deposited by account 0.
     steps.push(
-        send(
+        funder.send(
             provider,
-            &funder,
             vec![Frame::sender(Some(acct.address())).with_value(U256::from(20_000_000_000_000_000u64)).with_execution(10_000)],
             "the funder tops up account 0",
         )
@@ -385,25 +484,25 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
     let pm = PqBoundTicketPaymaster {
         key: *committee.sharing.public(),
         denomination: TICKET_PRICE,
-        carrier: Carrier::Modelled,
+        carrier: carrier()?,
         salt: B256::from(rng.random::<[u8; 32]>()),
     };
     let note: Note = rng.random();
-    let deposit = Frame::sender(Some(KEYED_POOL))
+    let deposit = Frame::sender(Some(keyed_pool()?))
         .with_value(U256::from(DENOMINATION))
         .with_data(depositCall { commitment: B256::from(note.commitment()) }.abi_encode())
         .with_execution(1_500_000)
         .with_state(3_000_000);
     let envelope = Envelope::fetch(provider, acct.address(), vec![U256::ZERO], TIP).await?;
-    let tx = TxPlan::new(&by_owner)
+    let mut tx = TxPlan::new(&by_owner)
         .calls([pm.deploy_frame(), pm.buy_frame(2), deposit])
         .build(&envelope)?;
-    let w = witnesses(&tx, &by_owner.keys())?;
+    let w = authorise(&mut tx, &by_owner.keys())?;
     let mut s = mined(provider, &tx, "account 0 deploys the leanSPHINCS bound paymaster, buys 2 tickets and deposits a note").await?;
     s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
     let block = s["block"].as_str().map_or(Ok(0), |b| u64::from_str_radix(b.trim_start_matches("0x"), 16))?;
     steps.push(s);
-    let leaf = pool_events(provider, KEYED_POOL, block)
+    let leaf = pool_events(provider, keyed_pool()?, block)
         .await?
         .into_iter()
         .find_map(|e| match e {
@@ -414,9 +513,9 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
 
     // 2. Issuance: two bound claims, blinded; the issuers see random points and a request.
     let fresh_key = sender(&seed, k_fresh);
-    let fresh_acct = fresh(&seed, &format!("sphincs/ticket/{k_fresh}/sender"), &fresh_key);
+    let fresh_acct = fresh(&seed, &format!("sphincs/ticket/{k_fresh}/sender"), &fresh_key)?;
     let to_key = recipient(&seed, run);
-    let to_acct = fresh(&seed, &format!("sphincs/recipient/{run}"), &to_key);
+    let to_acct = fresh(&seed, &format!("sphincs/recipient/{run}"), &to_key)?;
     let head = provider.get_block_by_number(alloy::eips::BlockNumberOrTag::Latest).await?.context("no head")?;
     let epoch = epoch_of(head.header.timestamp);
     let mut ledger = Ledger::new([(acct.address(), 2)].into());
@@ -424,7 +523,7 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
         Slot { chain_id, sender: fresh_acct.address(), nonce_keys: vec![U256::ZERO], nonce_seq: 0 },
         Slot {
             chain_id,
-            sender: KEYED_POOL,
+            sender: keyed_pool()?,
             nonce_keys: vec![U256::from_be_bytes(B256::from(note.nullifier_hash()).0)],
             nonce_seq: 0,
         },
@@ -456,11 +555,11 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
         let mut sponsor = PqSponsor(pm.pay_frame(&tickets[0], &b, 0));
         let f = Fresh { sender: &fresh_acct, key: &fresh_key, deploy: true };
         let fees = rpc::suggest_fees(provider, TIP).await?;
-        let tx = TxPlan::new(&f)
+        let mut tx = TxPlan::new(&f)
             .sponsored_by(&mut sponsor)
-            .call(post_frame(BOARD, b"paid with a leanSPHINCS-bound ticket"))
+            .call(post_frame(board_address()?, b"paid with a leanSPHINCS-bound ticket"))
             .build(&Envelope { chain_id, nonce_keys: vec![U256::ZERO], nonce_seq: 0, fees })?;
-        let w = witnesses(&tx, &[&fresh_key, &b])?;
+        let w = authorise(&mut tx, &[&fresh_key, &b])?;
         let mut s = mined(provider, &tx, "a fresh leanSPHINCS sender deploys itself and posts, paid by a bound ticket").await?;
         s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
         spends.push(s);
@@ -469,41 +568,65 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
     // 4. The withdrawal to the leanSPHINCS recipient, paid by ticket 1; its copies first.
     let pool_binder = binder(&seed, k_pool);
     let wfees = rpc::suggest_fees(provider, WITHDRAWAL_TIP).await?;
-    let original = withdrawal(provider, chain_id, note.clone(), leaf.leaf_index as usize, leaf.block_number, to_acct.address(), pm.pay_frame(&tickets[1], &pool_binder, 0), wfees).await?;
-    let w = witnesses(&original, &[&pool_binder])?;
+    let mut original = withdrawal(provider, chain_id, note.clone(), leaf.leaf_index as usize, leaf.block_number, to_acct.address(), pm.pay_frame(&tickets[1], &pool_binder, 0), wfees).await?;
+    let w = authorise(&mut original, &[&pool_binder])?;
+    let dependency = carrier()? == Carrier::Dependency;
+    let pay = original.frames.iter().position(|f| f.target == Some(pm.address())).context("the pay frame")?;
+    let dep = original.frames.iter().position(|f| f.mode == kohaku_frame_pq::DEP_VERIFY_FRAME_MODE);
+    let send_copy_a = env::var("SEND_COPY_A").is_ok_and(|v| v == "1");
     let mut copies = vec![];
     {
-        // (a) Fees raised by the replacement bump, the triple kept. Modelled, nothing on chain
-        // checks the binder's signature, so the node is expected to accept it: it is simulated
-        // only, never sent, and the binder's signature is checked against its hash here.
+        // (a) Fees raised by the replacement bump, the triple kept; no witness is handed in for
+        // its hash, and the binder's signature is checked against it here. Modelled, nothing on
+        // chain checks it, so it is simulated only. With SEND_COPY_A=1 it is also sent, before the
+        // original: what the node and the block's proof then do is prediction 4.
         let mut c = original.clone();
         c.fees.max_priority_fee_per_gas += c.fees.max_priority_fee_per_gas / 10;
         c.fees.max_fee_per_gas += c.fees.max_fee_per_gas / 10;
         let sim = rpc::simulate(provider, &c, "latest").await?;
         let holds = verify(pool_binder.public_key(), c.sig_hash(), &w[0].signature)?;
         println!("copy (a): simulation valid {}; the binder's signature over its hash verifies: {holds}", sim.valid);
+        let sent = if send_copy_a {
+            match rpc::send(provider, &c).await {
+                Ok(h) => json!({ "result": h }),
+                Err(e) => json!({ "error": e.to_string() }),
+            }
+        } else {
+            Value::Null
+        };
         copies.push(json!({
-            "what": "fees raised, the triple kept (simulated only, not sent)",
+            "what": if send_copy_a { "fees raised, the triple kept" } else { "fees raised, the triple kept (simulated only, not sent)" },
             "hash": c.hash(), "raw": c.encode(),
             "simulation": { "valid": sim.valid, "violation": sim.violation },
+            "sent": sent,
             "binderSignatureVerifiesOverCopy": holds,
         }));
     }
     {
-        // (b) The triple removed: 200 bytes of pay data.
+        // (b) The triple removed: the dependency frame, or the pay data's last 96 bytes.
         let mut c = original.clone();
-        c.frames[2].data = c.frames[2].data.slice(..200);
+        match dep {
+            Some(i) => {
+                c.frames.remove(i);
+            }
+            None => c.frames[pay].data = c.frames[pay].data.slice(..200),
+        }
         copies.push(refused(provider, &c, "copy (b): the binder's triple removed").await?);
     }
     {
         // (c) Another key named and declared, with its own signature.
         let other = binder(&seed, 99);
         let mut c = original.clone();
-        let mut data = c.frames[2].data.to_vec();
+        let mut data = c.frames[pay].data.to_vec();
         data[40..72].copy_from_slice(other.public_key().as_slice());
-        data[200..].copy_from_slice(&other.triple());
-        c.frames[2].data = data.into();
+        if dependency {
+            c.frames[dep.context("the dependency frame")?].data = other.triple().to_vec().into();
+        } else {
+            data[200..].copy_from_slice(&other.triple());
+        }
+        c.frames[pay].data = data.into();
         let wc = witnesses(&c, &[&other])?;
+        hand_in(&wc)?;
         let mut r = refused(provider, &c, "copy (c): another key named, declared and signing").await?;
         r["witnesses"] = Value::Array(wc.iter().map(witness_json).collect::<Result<_, _>>()?);
         copies.push(r);
@@ -519,10 +642,10 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
         // At the withdrawal's tip: the recipient holds one note, 0.001 ETH, and pays a
         // self-deployment's gas from it before it sends a tenth back.
         let envelope = Envelope::fetch(provider, to_acct.address(), vec![U256::ZERO], WITHDRAWAL_TIP).await?;
-        let tx = TxPlan::new(&f)
+        let mut tx = TxPlan::new(&f)
             .call(Frame::sender(Some(funder.address())).with_value(U256::from(DENOMINATION / 10)).with_execution(10_000))
             .build(&envelope)?;
-        let w = witnesses(&tx, &[&to_key])?;
+        let w = authorise(&mut tx, &[&to_key])?;
         let mut s = mined(provider, &tx, "the leanSPHINCS recipient deploys itself and sends a tenth back, paying its own gas").await?;
         s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
         spends.push(s);
@@ -558,8 +681,8 @@ fn view_key(seed: &Seed) -> SealKey {
 /// A transaction from `acting` making `calls`, mined, with its witnesses.
 async fn act<P: Provider>(provider: &P, acting: &Acting<'_>, calls: Vec<Frame>, what: &str) -> anyhow::Result<Value> {
     let envelope = Envelope::fetch(provider, acting.account.address(), vec![U256::ZERO], TIP).await?;
-    let tx = TxPlan::new(acting).calls(calls).build(&envelope)?;
-    let w = witnesses(&tx, &acting.keys())?;
+    let mut tx = TxPlan::new(acting).calls(calls).build(&envelope)?;
+    let w = authorise(&mut tx, &acting.keys())?;
     let mut s = mined(provider, &tx, what).await?;
     s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
     Ok(s)
@@ -578,7 +701,7 @@ struct Guardian {
 async fn recover<P: Provider>(provider: &P) -> anyhow::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut rng = rand::rng();
-    let funder = PrivateKeySigner::from_bytes(&env::var("PRIVATE_KEY").context("PRIVATE_KEY")?.parse()?)?;
+    let funder = Funder::load(&load_seed()?)?;
     let state_dir = std::path::PathBuf::from(env::var("STATE_DIR").context("STATE_DIR")?);
     let mut steps = vec![];
     let mut refusals = vec![];
@@ -603,14 +726,13 @@ async fn recover<P: Provider>(provider: &P) -> anyhow::Result<()> {
             .into_iter()
             .map(|share| {
                 let key = SphincsKey::from_seed(rng.random());
-                let account = SphincsSender { key: key.public_key(), carrier: Carrier::Modelled, salt: B256::from(rng.random::<[u8; 32]>()) };
+                let account = SphincsSender { key: key.public_key(), carrier: carrier().expect("CARRIER"), salt: B256::from(rng.random::<[u8; 32]>()) };
                 Guardian { index: share.index, share, key, account }
             })
             .collect();
         steps.push(
-            send(
+            funder.send(
                 provider,
-                &funder,
                 guardians
                     .iter()
                     .map(|g| Frame::sender(Some(g.account.address())).with_value(U256::from(3_000_000_000_000_000u64)).with_execution(10_000).with_state(NEW_ACCOUNT_STATE_GAS))
@@ -629,7 +751,7 @@ async fn recover<P: Provider>(provider: &P) -> anyhow::Result<()> {
         let mut s = act(
             provider,
             &by_owner,
-            vec![acct.operate(4, Some(c)).with_state(FRESH_SLOT_STATE_GAS), post_frame(BOARD, &env_bytes)],
+            vec![acct.operate(4, Some(c)).with_state(FRESH_SLOT_STATE_GAS), post_frame(board_address()?, &env_bytes)],
             "owner 0 commits account 0 to R and posts the envelope",
         )
         .await?;
@@ -653,7 +775,8 @@ async fn recover<P: Provider>(provider: &P) -> anyhow::Result<()> {
         let outside_keys = [r_key.public_key()];
         let by_outside = Acting { account: &acct, role: Role::Recovery { salt: salt_r, m: 1, keys: &outside_keys, signers: &outside } };
         let envelope = Envelope::fetch(provider, acct.address(), vec![U256::ZERO], TIP).await?;
-        let tx = TxPlan::new(&by_outside).call(acct.operate(1, Some(guardians[0].key.public_key()))).build(&envelope)?;
+        let mut tx = TxPlan::new(&by_outside).call(acct.operate(1, Some(guardians[0].key.public_key()))).build(&envelope)?;
+        authorise(&mut tx, &outside)?;
         refusals.push(refused(provider, &tx, "guardian 1's own key, outside the commitment, starts a recovery").await?);
         (acct, salt_r, r_key.public_key(), guardians, phrase)
     };
@@ -665,14 +788,14 @@ async fn recover<P: Provider>(provider: &P) -> anyhow::Result<()> {
         let sealed = seal::seal(&transport.public(), &g.share.encode(), rng.random())?;
         let f = Fresh { sender: &g.account, key: &g.key, deploy: true };
         let envelope = Envelope::fetch(provider, g.account.address(), vec![U256::ZERO], TIP).await?;
-        let tx = TxPlan::new(&f).call(post_frame(BOARD, &sealed)).build(&envelope)?;
-        let w = witnesses(&tx, &[&g.key])?;
+        let mut tx = TxPlan::new(&f).call(post_frame(board_address()?, &sealed)).build(&envelope)?;
+        let w = authorise(&mut tx, &[&g.key])?;
         let mut s = mined(provider, &tx, &format!("guardian {} deploys its account and posts its share, sealed with ML-KEM-768 to the new device", g.index)).await?;
         s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
         s["sealedBytes"] = json!(sealed.len());
         steps.push(s);
     }
-    let board = board_messages(provider, BOARD).await?;
+    let board = board_messages(provider, board_address()?).await?;
     let shares: Vec<Share> = board.iter().filter_map(|p| transport.open(&p.message)).filter_map(|b| Share::decode(&b).ok()).collect();
     ensure!(shares.len() >= 2, "{} shares on the board for this device", shares.len());
     let r = guardians::join(&shares, 2)?;
@@ -702,7 +825,7 @@ async fn recover<P: Provider>(provider: &P) -> anyhow::Result<()> {
     steps.push(act(provider, &by_pending, vec![acct.operate(2, None)], "owner 1 finishes it, past the unlock time").await?);
     ensure!(B256::from(provider.get_storage_at(acct.address(), U256::ZERO).await?) == owner1.public_key(), "owner 1 does not hold account 0");
     let by_owner1 = Acting { account: &acct, role: Role::Owner(&owner1) };
-    steps.push(act(provider, &by_owner1, vec![post_frame(BOARD, b"account 0, leanSPHINCS owner 1, after the recovery")], "account 0, authorised by owner 1").await?);
+    steps.push(act(provider, &by_owner1, vec![post_frame(board_address()?, b"account 0, leanSPHINCS owner 1, after the recovery")], "account 0, authorised by owner 1").await?);
 
     let record = json!({
         "arm": 3,
@@ -721,26 +844,26 @@ async fn recover<P: Provider>(provider: &P) -> anyhow::Result<()> {
 /// Arm 6.
 async fn sealed_note<P: Provider>(provider: &P) -> anyhow::Result<()> {
     let mut rng = rand::rng();
-    let funder = PrivateKeySigner::from_bytes(&env::var("PRIVATE_KEY").context("PRIVATE_KEY")?.parse()?)?;
+    let funder = Funder::load(&load_seed()?)?;
     let view_public = view_key(&load_seed()?).public();
     let note: Note = rng.random();
     let sealed = seal::seal(&view_public, &serde_json::to_vec(&note)?, rng.random())?;
-    let deposit = Frame::sender(Some(KEYED_POOL))
+    let deposit = Frame::sender(Some(keyed_pool()?))
         .with_value(U256::from(DENOMINATION))
         .with_data(depositCall { commitment: B256::from(note.commitment()) }.abi_encode())
         .with_execution(1_500_000)
         .with_state(3_000_000);
-    let mut s = send(provider, &funder, vec![deposit, post_frame(BOARD, &sealed)], "the funder deposits a pool note for the wallet and seals its opening to the ML-KEM-768 viewing key").await?;
+    let mut s = funder.send(provider, vec![deposit, post_frame(board_address()?, &sealed)], "the funder deposits a pool note for the wallet and seals its opening to the ML-KEM-768 viewing key").await?;
     s["sealedBytes"] = json!(sealed.len());
 
     // A fresh device with the seed alone: every board message it can open, against the pool.
     let seed = load_seed()?;
     let view = view_key(&seed);
     let started = Instant::now();
-    let board = board_messages(provider, BOARD).await?;
+    let board = board_messages(provider, board_address()?).await?;
     let opened: Vec<Note> = board.iter().filter_map(|p| view.open(&p.message)).filter_map(|b| serde_json::from_slice(&b).ok()).collect();
     let scan_ms = started.elapsed().as_millis();
-    let events = pool_events(provider, KEYED_POOL, 0).await?;
+    let events = pool_events(provider, keyed_pool()?, 0).await?;
     let found = opened.iter().find_map(|n| {
         events.iter().find_map(|e| match e {
             SyncEvent::Deposit(d) if d.commitment == n.commitment() => Some(d.clone()),
@@ -775,6 +898,19 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         "signer" => signer(),
+        "addresses" => {
+            // What a chain's genesis must fund when PRIVATE_KEY is unset: the leanSPHINCS funder.
+            let seed = load_seed()?;
+            let funder = Funder::load(&seed)?;
+            let o = owner(&seed, 0, 0);
+            println!("{}", json!({
+                "carrier": format!("{:?}", carrier()?),
+                "funder": funder.address(),
+                "funderIsSecp256k1": matches!(funder, Funder::Eoa(_)),
+                "account0": account0(&seed, &o).address(),
+            }));
+            Ok(())
+        }
         "account" => account(&provider).await,
         "tickets" => tickets(&provider).await,
         "recover" => recover(&provider).await,
