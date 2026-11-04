@@ -7,6 +7,8 @@
 //! SEED_FILE=... RECORD=signer.json MODE=signer ...
 //! SEED_FILE=... PRIVATE_KEY=0x... RECORD=account.json MODE=account ...
 //! SEED_FILE=... PRIVATE_KEY=0x... RECORD=tickets.json MODE=tickets ...
+//! SEED_FILE=... PRIVATE_KEY=0x... STATE_DIR=... RECORD=recover.json MODE=recover ...
+//! SEED_FILE=... PRIVATE_KEY=0x... RECORD=seal.json MODE=seal ...
 //! ```
 //!
 //! Build with `RUSTFLAGS="-C target-cpu=native"` for comparable times.
@@ -22,6 +24,15 @@
 //! recipient, the pool its own sender, paid by the other, after three copies are tried; the
 //! recipient deploys itself and pays its own gas from what it received. `RUN=<r>` (default 0)
 //! picks tickets `2r` and `2r + 1` and recipient `r`.
+//! `MODE=recover` (arm 3), after `MODE=account`: a leanSPHINCS recovery key `R`, split 2 of 3 to
+//! three guardians with leanSPHINCS accounts of their own; account 0 commits to `R` and posts the
+//! envelope; guardians 2 and 3 collude and start a recovery to a key of theirs, which owner 0
+//! cancels; guardian 1's own key, outside the commitment, is refused. Then the device is lost:
+//! a new device has the phrase (`STATE_DIR/phrase.txt`) and a fresh ML-KEM-768 transport key;
+//! guardians 1 and 3 post their shares sealed to it; it joins `R`, opens the envelope, has the
+//! seed, and `R` starts a recovery to owner 1, who finishes after the delay and then posts.
+//! `MODE=seal` (arm 6): the funder deposits a pool note for the wallet and seals its opening with
+//! ML-KEM-768 to the viewing key `sphincs/view`; a fresh device with only the seed finds it.
 //!
 //! No mnemonic, seed, secret key or signature is printed or recorded: the record keeps each
 //! signature's keccak256 and whether it verified.
@@ -63,8 +74,13 @@ use kohaku_frame_pool::{
 };
 use kohaku_frame_pq::{
     PUBLIC_KEY_LEN, SIGNATURE_LEN, SphincsKey,
-    account::{Acting, Carrier, Fresh, Role, SphincsAccount, SphincsSender, Witness, witnesses},
-    binder, owner, recipient, sender,
+    account::{
+        Acting, Carrier, FRESH_SLOT_STATE_GAS, Fresh, Role, SphincsAccount, SphincsSender, Witness,
+        commitment, witnesses,
+    },
+    binder, envelope, owner, recipient,
+    seal::{self, SealKey},
+    sender,
     ticket::{PqBoundClaim, PqBoundTicket, PqBoundTicketPaymaster},
     verify,
 };
@@ -76,8 +92,12 @@ use kohaku_frame_ticket::{
 use kohaku_frame_wallet::recovery::{pool_events, root_slot};
 use kohaku_tornadocash::{Note, Payer, merkle_tree::MerkleTree, syncer::SyncEvent};
 use rand::RngExt;
-use kohaku_frame_registry::announce::post_frame;
-use kohaku_frame_secrets::Seed;
+use kohaku_frame_kit::constants::NEW_ACCOUNT_STATE_GAS;
+use kohaku_frame_registry::announce::{board_messages, post_frame};
+use kohaku_frame_secrets::{
+    Seed,
+    guardians::{self, Share},
+};
 use serde_json::{Value, json};
 
 const DELAY: u64 = 120;
@@ -527,6 +547,219 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
     write_record(&record)
 }
 
+/// The viewing key: ML-KEM-768 from the seed's `sphincs/view/d` and `sphincs/view/z`.
+fn view_key(seed: &Seed) -> SealKey {
+    let mut s = [0u8; 64];
+    s[..32].copy_from_slice(&seed.key("sphincs/view/d"));
+    s[32..].copy_from_slice(&seed.key("sphincs/view/z"));
+    SealKey::from_seed(s)
+}
+
+/// A transaction from `acting` making `calls`, mined, with its witnesses.
+async fn act<P: Provider>(provider: &P, acting: &Acting<'_>, calls: Vec<Frame>, what: &str) -> anyhow::Result<Value> {
+    let envelope = Envelope::fetch(provider, acting.account.address(), vec![U256::ZERO], TIP).await?;
+    let tx = TxPlan::new(acting).calls(calls).build(&envelope)?;
+    let w = witnesses(&tx, &acting.keys())?;
+    let mut s = mined(provider, &tx, what).await?;
+    s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
+    Ok(s)
+}
+
+/// A guardian: its share, and a one-key leanSPHINCS account of its own.
+struct Guardian {
+    index: u8,
+    share: Share,
+    key: SphincsKey,
+    account: SphincsSender,
+}
+
+/// Arm 3.
+#[allow(clippy::too_many_lines)]
+async fn recover<P: Provider>(provider: &P) -> anyhow::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut rng = rand::rng();
+    let funder = PrivateKeySigner::from_bytes(&env::var("PRIVATE_KEY").context("PRIVATE_KEY")?.parse()?)?;
+    let state_dir = std::path::PathBuf::from(env::var("STATE_DIR").context("STATE_DIR")?);
+    let mut steps = vec![];
+    let mut refusals = vec![];
+
+    // 1. Setup, on the device that holds the seed.
+    let (acct, salt_r, r_pk, guardians, phrase) = {
+        let seed = load_seed()?;
+        let words = fs::read_to_string(env::var("SEED_FILE")?)?.trim().to_owned();
+        let owner0 = owner(&seed, 0, 0);
+        let acct = account0(&seed, &owner0);
+        ensure!(B256::from(provider.get_storage_at(acct.address(), U256::ZERO).await?) == owner0.public_key(), "run MODE=account first; owner 0 must hold account 0");
+        let phrase = format!("pq phrase {}", common::hex(&rng.random::<[u8; 8]>()));
+        let mut f = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(state_dir.join("phrase.txt"))?;
+        std::io::Write::write_all(&mut f, phrase.as_bytes())?;
+        // R: a random 32-byte secret, a secp256k1 scalar so that experiment 46's Shamir splits it,
+        // used as a leanSPHINCS seed.
+        let r = PrivateKeySigner::random();
+        let r_seed: [u8; 32] = r.to_bytes().0;
+        let r_key = SphincsKey::from_seed(r_seed);
+        let shares = guardians::split(&r, 2, 3, &mut rng);
+        let guardians: Vec<Guardian> = shares
+            .into_iter()
+            .map(|share| {
+                let key = SphincsKey::from_seed(rng.random());
+                let account = SphincsSender { key: key.public_key(), carrier: Carrier::Modelled, salt: B256::from(rng.random::<[u8; 32]>()) };
+                Guardian { index: share.index, share, key, account }
+            })
+            .collect();
+        steps.push(
+            send(
+                provider,
+                &funder,
+                guardians
+                    .iter()
+                    .map(|g| Frame::sender(Some(g.account.address())).with_value(U256::from(3_000_000_000_000_000u64)).with_execution(10_000).with_state(NEW_ACCOUNT_STATE_GAS))
+                    .collect(),
+                "the funder pays three guardians' leanSPHINCS accounts a little gas",
+            )
+            .await?,
+        );
+        let salt_r = B256::from(seed.key("sphincs/account/0/recovery-salt/0"));
+        let c = commitment(salt_r, 1, &[r_key.public_key()]);
+        let started = Instant::now();
+        let stretched = envelope::stretch(&phrase, r_key.public_key());
+        let stretch_ms = started.elapsed().as_millis();
+        let env_bytes = envelope::seal(&words, &r_seed, r_key.public_key(), &stretched, rng.random())?;
+        let by_owner = Acting { account: &acct, role: Role::Owner(&owner0) };
+        let mut s = act(
+            provider,
+            &by_owner,
+            vec![acct.operate(4, Some(c)).with_state(FRESH_SLOT_STATE_GAS), post_frame(BOARD, &env_bytes)],
+            "owner 0 commits account 0 to R and posts the envelope",
+        )
+        .await?;
+        s["stretchMs"] = json!(stretch_ms);
+        s["envelopeBytes"] = json!(env_bytes.len());
+        steps.push(s);
+
+        // Guardians 2 and 3 collude: they join R and start a recovery to a key of their own.
+        let rogue = SphincsKey::from_seed(rng.random());
+        let joined = guardians::join(&[guardians[1].share.clone(), guardians[2].share.clone()], 2)?;
+        let r_by_them = SphincsKey::from_seed(joined.to_bytes().0);
+        ensure!(r_by_them.public_key() == r_key.public_key(), "guardians 2 and 3 did not rebuild R");
+        let keys = [r_key.public_key()];
+        let signers = [&r_by_them];
+        let by_r = Acting { account: &acct, role: Role::Recovery { salt: salt_r, m: 1, keys: &keys, signers: &signers } };
+        steps.push(act(provider, &by_r, vec![acct.operate(1, Some(rogue.public_key())).with_state(FRESH_SLOT_STATE_GAS)], "guardians 2 and 3, with R, start a recovery to their own key").await?);
+        steps.push(act(provider, &by_owner, vec![acct.operate(3, None)], "owner 0 cancels it").await?);
+
+        // Guardian 1's own key is not R: refused.
+        let outside = [&guardians[0].key];
+        let outside_keys = [r_key.public_key()];
+        let by_outside = Acting { account: &acct, role: Role::Recovery { salt: salt_r, m: 1, keys: &outside_keys, signers: &outside } };
+        let envelope = Envelope::fetch(provider, acct.address(), vec![U256::ZERO], TIP).await?;
+        let tx = TxPlan::new(&by_outside).call(acct.operate(1, Some(guardians[0].key.public_key()))).build(&envelope)?;
+        refusals.push(refused(provider, &tx, "guardian 1's own key, outside the commitment, starts a recovery").await?);
+        (acct, salt_r, r_key.public_key(), guardians, phrase)
+    };
+    println!("the device is lost: the user keeps the phrase; the guardians keep their shares");
+
+    // 2. The new device: the phrase, account 0's address, and a fresh transport key.
+    let transport = SealKey::from_seed(rng.random());
+    for g in [&guardians[0], &guardians[2]] {
+        let sealed = seal::seal(&transport.public(), &g.share.encode(), rng.random())?;
+        let f = Fresh { sender: &g.account, key: &g.key, deploy: true };
+        let envelope = Envelope::fetch(provider, g.account.address(), vec![U256::ZERO], TIP).await?;
+        let tx = TxPlan::new(&f).call(post_frame(BOARD, &sealed)).build(&envelope)?;
+        let w = witnesses(&tx, &[&g.key])?;
+        let mut s = mined(provider, &tx, &format!("guardian {} deploys its account and posts its share, sealed with ML-KEM-768 to the new device", g.index)).await?;
+        s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
+        s["sealedBytes"] = json!(sealed.len());
+        steps.push(s);
+    }
+    let board = board_messages(provider, BOARD).await?;
+    let shares: Vec<Share> = board.iter().filter_map(|p| transport.open(&p.message)).filter_map(|b| Share::decode(&b).ok()).collect();
+    ensure!(shares.len() >= 2, "{} shares on the board for this device", shares.len());
+    let r = guardians::join(&shares, 2)?;
+    let r_seed = r.to_bytes().0;
+    let r_key = SphincsKey::from_seed(r_seed);
+    ensure!(r_key.public_key() == r_pk, "the shares did not give R");
+    let phrase_read = fs::read_to_string(state_dir.join("phrase.txt"))?;
+    ensure!(phrase_read == phrase, "the phrase file changed");
+    let found = board.iter().find(|p| p.message.len() == envelope::LEN && p.message[0] == envelope::TAG && p.message[1..33] == envelope::locator(r_pk)[..]).context("no envelope for R")?;
+    let started = Instant::now();
+    let words = envelope::open(&found.message, &r_seed, r_pk, &envelope::stretch(&phrase_read, r_pk))?;
+    let open_ms = started.elapsed().as_millis();
+    let seed = Seed::from_mnemonic(&words)?;
+    let owner1 = owner(&seed, 0, 1);
+    ensure!(account0(&seed, &owner(&seed, 0, 0)).address() == acct.address(), "the seed does not give account 0");
+    ensure!(B256::from(provider.get_storage_at(acct.address(), U256::from(1)).await?) == commitment(B256::from(seed.key("sphincs/account/0/recovery-salt/0")), 1, &[r_pk]), "account 0 is not committed to R");
+    println!("the new device joined R, opened the envelope in {open_ms} ms, and has the seed");
+
+    // 3. R starts a recovery to owner 1, who finishes after the delay and posts.
+    let keys = [r_pk];
+    let signers = [&r_key];
+    let by_r = Acting { account: &acct, role: Role::Recovery { salt: salt_r, m: 1, keys: &keys, signers: &signers } };
+    steps.push(act(provider, &by_r, vec![acct.operate(1, Some(owner1.public_key()))], "R starts a recovery to owner 1").await?);
+    let unlock = u64::try_from(provider.get_storage_at(acct.address(), U256::from(3)).await?)?;
+    common::wait_until(provider, unlock).await?;
+    let by_pending = Acting { account: &acct, role: Role::Pending(&owner1) };
+    steps.push(act(provider, &by_pending, vec![acct.operate(2, None)], "owner 1 finishes it, past the unlock time").await?);
+    ensure!(B256::from(provider.get_storage_at(acct.address(), U256::ZERO).await?) == owner1.public_key(), "owner 1 does not hold account 0");
+    let by_owner1 = Acting { account: &acct, role: Role::Owner(&owner1) };
+    steps.push(act(provider, &by_owner1, vec![post_frame(BOARD, b"account 0, leanSPHINCS owner 1, after the recovery")], "account 0, authorised by owner 1").await?);
+
+    let record = json!({
+        "arm": 3,
+        "chain": "ethrex Hegota testnet, EIP-8288 modelled",
+        "account": acct.address(),
+        "recoveryKey": r_pk,
+        "guardians": guardians.iter().map(|g| json!({ "index": g.index, "account": g.account.address(), "key": g.key.public_key() })).collect::<Vec<_>>(),
+        "envelope": { "tx": found.tx, "bytes": envelope::LEN, "openMs": open_ms },
+        "transportKeyBytes": transport.public().len(),
+        "steps": steps,
+        "refused": refusals,
+    });
+    write_record(&record)
+}
+
+/// Arm 6.
+async fn sealed_note<P: Provider>(provider: &P) -> anyhow::Result<()> {
+    let mut rng = rand::rng();
+    let funder = PrivateKeySigner::from_bytes(&env::var("PRIVATE_KEY").context("PRIVATE_KEY")?.parse()?)?;
+    let view_public = view_key(&load_seed()?).public();
+    let note: Note = rng.random();
+    let sealed = seal::seal(&view_public, &serde_json::to_vec(&note)?, rng.random())?;
+    let deposit = Frame::sender(Some(KEYED_POOL))
+        .with_value(U256::from(DENOMINATION))
+        .with_data(depositCall { commitment: B256::from(note.commitment()) }.abi_encode())
+        .with_execution(1_500_000)
+        .with_state(3_000_000);
+    let mut s = send(provider, &funder, vec![deposit, post_frame(BOARD, &sealed)], "the funder deposits a pool note for the wallet and seals its opening to the ML-KEM-768 viewing key").await?;
+    s["sealedBytes"] = json!(sealed.len());
+
+    // A fresh device with the seed alone: every board message it can open, against the pool.
+    let seed = load_seed()?;
+    let view = view_key(&seed);
+    let started = Instant::now();
+    let board = board_messages(provider, BOARD).await?;
+    let opened: Vec<Note> = board.iter().filter_map(|p| view.open(&p.message)).filter_map(|b| serde_json::from_slice(&b).ok()).collect();
+    let scan_ms = started.elapsed().as_millis();
+    let events = pool_events(provider, KEYED_POOL, 0).await?;
+    let found = opened.iter().find_map(|n| {
+        events.iter().find_map(|e| match e {
+            SyncEvent::Deposit(d) if d.commitment == n.commitment() => Some(d.clone()),
+            _ => None,
+        })
+    });
+    let found = found.context("no sealed note found in the pool")?;
+    let spent = events.iter().any(|e| matches!(e, SyncEvent::Withdrawal(w) if w.nullifier_hash == note.nullifier_hash()));
+    println!("the fresh device opened {} of {} board messages in {scan_ms} ms; the note is leaf {}, spent {spent}", opened.len(), board.len(), found.leaf_index);
+    let record = json!({
+        "arm": 6,
+        "chain": "ethrex Hegota testnet",
+        "viewKeyBytes": view_public.len(),
+        "steps": [s],
+        "found": { "leaf": found.leaf_index, "block": found.block_number, "spent": spent, "boardMessages": board.len(), "opened": opened.len(), "scanMs": scan_ms },
+    });
+    write_record(&record)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let url = env::var("RPC_URL").unwrap_or_else(|_| rpc::HEGOTA_RPC_URL.to_owned());
@@ -544,6 +777,8 @@ async fn main() -> anyhow::Result<()> {
         "signer" => signer(),
         "account" => account(&provider).await,
         "tickets" => tickets(&provider).await,
+        "recover" => recover(&provider).await,
+        "seal" => sealed_note(&provider).await,
         other => anyhow::bail!("MODE {other}?"),
     }
 }

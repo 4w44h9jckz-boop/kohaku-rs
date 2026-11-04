@@ -26,6 +26,8 @@
 //! ```
 
 pub mod account;
+pub mod envelope;
+pub mod seal;
 pub mod ticket;
 
 use alloy::primitives::{B256, U256};
