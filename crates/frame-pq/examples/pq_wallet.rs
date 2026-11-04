@@ -492,13 +492,16 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
 
     // 5. The recipient deploys itself and pays its own gas from what it received.
     {
-        let f = Fresh { sender: &to_acct, key: &to_key, deploy: true };
-        let envelope = Envelope::fetch(provider, to_acct.address(), vec![U256::ZERO], TIP).await?;
+        let deploy = provider.get_code_at(to_acct.address()).await?.is_empty();
+        let f = Fresh { sender: &to_acct, key: &to_key, deploy };
+        // At the withdrawal's tip: the recipient holds one note, 0.001 ETH, and pays a
+        // self-deployment's gas from it before it sends a tenth back.
+        let envelope = Envelope::fetch(provider, to_acct.address(), vec![U256::ZERO], WITHDRAWAL_TIP).await?;
         let tx = TxPlan::new(&f)
-            .call(Frame::sender(Some(funder.address())).with_value(U256::from(DENOMINATION / 2)).with_execution(10_000))
+            .call(Frame::sender(Some(funder.address())).with_value(U256::from(DENOMINATION / 10)).with_execution(10_000))
             .build(&envelope)?;
         let w = witnesses(&tx, &[&to_key])?;
-        let mut s = mined(provider, &tx, "the leanSPHINCS recipient deploys itself and sends half back, paying its own gas").await?;
+        let mut s = mined(provider, &tx, "the leanSPHINCS recipient deploys itself and sends a tenth back, paying its own gas").await?;
         s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
         spends.push(s);
     }
