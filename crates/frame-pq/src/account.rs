@@ -10,7 +10,7 @@ use kohaku_frame_accounts::contracts::{create2_address, deploy_frame, self_deplo
 use kohaku_frame_accounts::account::FrameAccount;
 use kohaku_frame_kit::{
     Frame, FrameSignature, FrameTx,
-    constants::{CPSB, approve},
+    constants::{CPSB, NEW_ACCOUNT_STATE_GAS, approve},
 };
 
 use crate::{PqError, SphincsKey, TRIPLE_LEN, dependency_frame, verify as verify_signature};
@@ -143,6 +143,12 @@ impl SphincsAccount {
     }
 }
 
+/// `SphincsSender`'s constructor, as solc 0.8.37 compiles it: 21 bytes before the runtime.
+#[cfg(test)]
+const SENDER_CONSTRUCTOR_LEN: usize = 21;
+/// `SphincsSender`'s deployed code: its runtime, the carrier flag and the key.
+pub const SENDER_RUNTIME_LEN: usize = 190;
+
 /// A `SphincsSender`: one key, kept in the code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SphincsSender {
@@ -165,10 +171,13 @@ impl SphincsSender {
         create2_address(&self.initcode(), self.salt)
     }
 
-    /// The account deploying itself at `tx.sender`, ahead of its own `VERIFY`.
+    /// The account deploying itself at `tx.sender`, ahead of its own `VERIFY`. Its state gas is
+    /// a new account and the runtime's code deposit, not the initcode's, which would pass the
+    /// validation prefix's 500,000.
     #[must_use]
     pub fn self_deploy_frame(&self) -> Frame {
-        self_deploy_frame(&self.initcode(), self.salt)
+        let state = NEW_ACCOUNT_STATE_GAS + CPSB * SENDER_RUNTIME_LEN as u64;
+        self_deploy_frame(&self.initcode(), self.salt).with_state(state)
     }
 
     /// Its `VERIFY`, with its triple when modelled.
@@ -291,17 +300,14 @@ pub fn witnesses(tx: &FrameTx, keys: &[&SphincsKey]) -> Result<Vec<Witness>, PqE
 
 #[cfg(test)]
 mod tests {
-    use kohaku_frame_kit::constants::{MAX_VERIFY_STATE_GAS, NEW_ACCOUNT_STATE_GAS};
+    use kohaku_frame_kit::constants::MAX_VERIFY_STATE_GAS;
 
     use super::*;
-
-    /// `SphincsSender`'s constructor, as solc 0.8.37 compiles it: 21 bytes before the runtime.
-    const SENDER_CONSTRUCTOR_LEN: usize = 21;
 
     #[test]
     fn a_sender_fits_the_validation_prefix_state_cap() {
         let n = (sphincs_sender_code().len() - SENDER_CONSTRUCTOR_LEN + 33) as u64;
-        assert_eq!(n, 190);
+        assert_eq!(n, SENDER_RUNTIME_LEN as u64);
         assert!(NEW_ACCOUNT_STATE_GAS + CPSB * n <= MAX_VERIFY_STATE_GAS, "{n} bytes of runtime");
     }
 
