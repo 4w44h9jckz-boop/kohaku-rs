@@ -20,7 +20,8 @@
 //! two blinded bound claims, each request signed by account 0's owner key; a fresh leanSPHINCS
 //! sender deploys itself and posts, paid by one ticket; the note is withdrawn to a leanSPHINCS
 //! recipient, the pool its own sender, paid by the other, after three copies are tried; the
-//! recipient deploys itself and pays its own gas from what it received.
+//! recipient deploys itself and pays its own gas from what it received. `RUN=<r>` (default 0)
+//! picks tickets `2r` and `2r + 1` and recipient `r`.
 //!
 //! No mnemonic, seed, secret key or signature is printed or recorded: the record keeps each
 //! signature's keccak256 and whether it verified.
@@ -233,8 +234,6 @@ const KEYED_POOL: Address = address!("0x73e47a8DA2C83Beb802708Fc473B5B7D094f3eE6
 /// The tip of the withdrawal and its copies, low enough that one ticket covers the max cost.
 const WITHDRAWAL_TIP: u128 = 100_000_000;
 const POOL_VERIFY: u64 = 260_000;
-const K_FRESH: u32 = 0;
-const K_POOL: u32 = 1;
 
 fn pool() -> FramePool {
     FramePool {
@@ -346,6 +345,9 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
     let acct = account0(&seed, &owner0);
     ensure!(!provider.get_code_at(acct.address()).await?.is_empty(), "run MODE=account first");
     let by_owner = Acting { account: &acct, role: Role::Owner(&owner0) };
+    // Each run takes its own tickets and recipient: a fresh sender's address is fixed by its label.
+    let run: u32 = env::var("RUN").map_or(Ok(0), |r| r.parse())?;
+    let (k_fresh, k_pool) = (2 * run, 2 * run + 1);
     let mut rng = rand::rng();
     let mut steps = vec![];
 
@@ -391,10 +393,10 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
         .context("the deposit's event")?;
 
     // 2. Issuance: two bound claims, blinded; the issuers see random points and a request.
-    let fresh_key = sender(&seed, K_FRESH);
-    let fresh_acct = fresh(&seed, "sphincs/ticket/0/sender", &fresh_key);
-    let to_key = recipient(&seed, 0);
-    let to_acct = fresh(&seed, "sphincs/recipient/0", &to_key);
+    let fresh_key = sender(&seed, k_fresh);
+    let fresh_acct = fresh(&seed, &format!("sphincs/ticket/{k_fresh}/sender"), &fresh_key);
+    let to_key = recipient(&seed, run);
+    let to_acct = fresh(&seed, &format!("sphincs/recipient/{run}"), &to_key);
     let head = provider.get_block_by_number(alloy::eips::BlockNumberOrTag::Latest).await?.context("no head")?;
     let epoch = epoch_of(head.header.timestamp);
     let mut ledger = Ledger::new([(acct.address(), 2)].into());
@@ -409,7 +411,7 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
     ];
     let mut tickets = vec![];
     let mut issuers_saw = vec![];
-    for (k, slot) in [K_FRESH, K_POOL].into_iter().zip(slots) {
+    for (k, slot) in [k_fresh, k_pool].into_iter().zip(slots) {
         let secrets = seed.ticket(k)?;
         let c = PqBoundClaim {
             claim: Claim { slot, epoch, salt: secrets.salt },
@@ -430,7 +432,7 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
     // 3. The fresh sender: deploys itself, posts, paid by ticket 0.
     let mut spends = vec![];
     {
-        let b = binder(&seed, K_FRESH);
+        let b = binder(&seed, k_fresh);
         let mut sponsor = PqSponsor(pm.pay_frame(&tickets[0], &b, 0));
         let f = Fresh { sender: &fresh_acct, key: &fresh_key, deploy: true };
         let fees = rpc::suggest_fees(provider, TIP).await?;
@@ -445,7 +447,7 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
     }
 
     // 4. The withdrawal to the leanSPHINCS recipient, paid by ticket 1; its copies first.
-    let pool_binder = binder(&seed, K_POOL);
+    let pool_binder = binder(&seed, k_pool);
     let wfees = rpc::suggest_fees(provider, WITHDRAWAL_TIP).await?;
     let original = withdrawal(provider, chain_id, note.clone(), leaf.leaf_index as usize, leaf.block_number, to_acct.address(), pm.pay_frame(&tickets[1], &pool_binder, 0), wfees).await?;
     let w = witnesses(&original, &[&pool_binder])?;
@@ -508,6 +510,7 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
 
     let record = json!({
         "arm": [4, 5],
+        "run": run,
         "chain": "ethrex Hegota testnet, EIP-8288 modelled",
         "committeeKey": format!("0x{}", common::hex(&committee.sharing.public().encode())),
         "epoch": epoch,
