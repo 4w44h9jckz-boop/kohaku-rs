@@ -26,6 +26,7 @@
 //! ```
 
 pub mod account;
+pub mod ticket;
 
 use alloy::primitives::{B256, U256};
 use kohaku_frame_kit::Frame;
