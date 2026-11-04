@@ -1,0 +1,29 @@
+[package]
+name = "kohaku-frame-pq"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy = { workspace = true }
+hex = { workspace = true }
+kohaku-frame-accounts = { workspace = true }
+kohaku-frame-kit = { workspace = true }
+kohaku-frame-secrets = { workspace = true }
+# leanSPHINCS from leanVM at 3cbac04 (MIT or Apache-2.0). Build with RUSTFLAGS="-C target-cpu=native"
+# for comparable times: leanVM's own workspace sets it, and a crate outside it does not inherit it.
+signatures = { git = "https://github.com/leanEthereum/leanVM", rev = "3cbac047160f4d1465bfe985521603b0a3418556" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+anyhow = { workspace = true }
+commonware-codec = { workspace = true }
+commonware-cryptography = { workspace = true }
+commonware-math = { workspace = true }
+kohaku-frame-registry = { workspace = true }
+kohaku-frame-ticket = { workspace = true }
+rand = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

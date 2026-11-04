@@ -5095,6 +5095,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "kohaku-frame-pq"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-math",
+ "hex",
+ "kohaku-frame-accounts",
+ "kohaku-frame-kit",
+ "kohaku-frame-registry",
+ "kohaku-frame-secrets",
+ "kohaku-frame-ticket",
+ "rand 0.10.2",
+ "serde_json",
+ "signatures",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "kohaku-frame-registry"
 version = "0.1.0"
 dependencies = [
@@ -5945,6 +5967,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "parallel"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "parity-scale-codec"
 version = "3.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6329,6 +6359,15 @@ dependencies = [
  "fixed-hash",
  "impl-codec",
  "uint",
+]
+
+[[package]]
+name = "primitives"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
+dependencies = [
+ "parallel",
+ "serde",
 ]
 
 [[package]]
@@ -7561,6 +7600,17 @@ checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
 dependencies = [
  "digest 0.11.3",
  "rand_core 0.10.1",
+]
+
+[[package]]
+name = "signatures"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
+dependencies = [
+ "parallel",
+ "primitives",
+ "rand 0.9.5",
+ "serde",
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ members = [
     "frame-exit",
     "frame-kit",
     "frame-pool",
+    "frame-pq",
     "frame-registry",
     "frame-secrets",
     "frame-ticket",
@@ -67,6 +68,7 @@ kohaku-frame-display = { path = "frame-display" }
 kohaku-frame-exit = { path = "frame-exit" }
 kohaku-frame-kit = { path = "frame-kit" }
 kohaku-frame-pool = { path = "frame-pool" }
+kohaku-frame-pq = { path = "frame-pq" }
 kohaku-frame-registry = { path = "frame-registry" }
 kohaku-frame-secrets = { path = "frame-secrets" }
 kohaku-frame-ticket = { path = "frame-ticket" }
