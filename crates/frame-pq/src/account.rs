@@ -264,15 +264,16 @@ impl FrameAccount for Fresh<'_> {
     }
 }
 
-/// Put `keys`' triples in one dependency frame right after the sender's `VERIFY` (the first
-/// `VERIFY` frame), for a [`Carrier::Dependency`] account. The signature hash changes, so sign
-/// after this.
+/// Put `keys`' triples in one dependency frame right after the last `VERIFY` frame, for a
+/// [`Carrier::Dependency`] account: after the paymaster's, so that the validation prefix keeps a
+/// shape a node recognizes (ethrex admits only `VERIFY` frames, after an optional deployment, in
+/// the prefix). The signature hash changes, so sign after this.
 pub fn declare(tx: &mut FrameTx, keys: &[&SphincsKey]) {
     let triples: Vec<_> = keys.iter().map(|k| k.triple()).collect();
     let at = tx
         .frames
         .iter()
-        .position(|f| f.mode == kohaku_frame_kit::constants::mode::VERIFY)
+        .rposition(|f| f.mode == kohaku_frame_kit::constants::mode::VERIFY)
         .map_or(0, |i| i + 1);
     tx.frames.insert(at, dependency_frame(&triples));
 }
