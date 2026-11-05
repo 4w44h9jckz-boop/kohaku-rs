@@ -11,6 +11,8 @@
 //! leanVM has no zero knowledge at `3cbac04`: a proof hides nothing it was given, the plaintext
 //! included.
 
+pub mod v2;
+
 use std::collections::BTreeMap;
 
 use kohaku_fhe_input::{Encryption, PkeParams};
@@ -40,15 +42,22 @@ pub fn program_key() -> [u8; 32] {
 #[must_use]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn gp(e: i128) -> F192 {
-    let r = e.rem_euclid(ORDER as i128) as u128;
+    let r = e.rem_euclid(ORDER.cast_signed()) as u128;
     F192::new(g_pow(r as usize).0, 0, 0)
 }
 
 /// A 32-byte value as its two cells: bytes 0..16 then 16..32, each two little-endian limbs.
+///
+/// # Panics
+///
+/// Never: the slices are 8 bytes.
 #[must_use]
 pub fn cells_of(b: &[u8; 32]) -> [F192; 2] {
     let limb = |o: usize| u64::from_le_bytes(b[o..o + 8].try_into().expect("8 bytes"));
-    [F192::new(limb(0), limb(8), 0), F192::new(limb(16), limb(24), 0)]
+    [
+        F192::new(limb(0), limb(8), 0),
+        F192::new(limb(16), limb(24), 0),
+    ]
 }
 
 #[allow(clippy::cast_sign_loss)]
@@ -67,6 +76,45 @@ fn bytes_of(coefs: &[i64], cells: usize) -> Vec<u8> {
     }
     out.resize(16 * cells, 0);
     out
+}
+
+/// What both versions hash and publish: the key and the ciphertext as cells and bytes, and the
+/// digest `H(H(H(pk), H(ct)), mu)`.
+#[derive(Debug, Clone)]
+pub struct Public {
+    pub pk_coefs: Vec<i64>,
+    pub ct_coefs: Vec<i64>,
+    pub pk_cells: Vec<F192>,
+    pub ct_cells: Vec<F192>,
+    pub pk_bytes: Vec<u8>,
+    pub ct_bytes: Vec<u8>,
+    pub digest: [u8; 32],
+}
+
+impl Public {
+    /// For `enc`'s key, the ciphertext `c1` with `enc.c2`, and `mu`.
+    #[must_use]
+    pub fn of(enc: &Encryption, c1: &[i64], mu: [u8; 32]) -> Self {
+        let ct_coefs: Vec<i64> = c1.iter().chain(&enc.c2).copied().collect();
+        let pk_coefs: Vec<i64> = enc.a.iter().chain(&enc.b).copied().collect();
+        let pk_cells = pair_cells(&pk_coefs);
+        let ct_cells = pair_cells(&ct_coefs);
+        let pk_bytes = bytes_of(&pk_coefs, pk_cells.len());
+        let ct_bytes = bytes_of(&ct_coefs, ct_cells.len());
+        let hpk: [u8; 32] = Keccak256::digest(&pk_bytes).into();
+        let hct: [u8; 32] = Keccak256::digest(&ct_bytes).into();
+        let inner: [u8; 32] = Keccak256::digest([hpk, hct].concat()).into();
+        let digest: [u8; 32] = Keccak256::digest([inner, mu].concat()).into();
+        Self {
+            pk_coefs,
+            ct_coefs,
+            pk_cells,
+            ct_cells,
+            pk_bytes,
+            ct_bytes,
+            digest,
+        }
+    }
 }
 
 /// What the program reads, and what it publishes.
@@ -101,7 +149,13 @@ fn halves(x: i64) -> (i128, i128) {
 ///
 /// If `enc` does not satisfy the relation, which `encrypt` guarantees.
 #[must_use]
-#[allow(clippy::too_many_lines, clippy::many_single_char_names, clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+#[allow(
+    clippy::too_many_lines,
+    clippy::many_single_char_names,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 pub fn instance(p: &PkeParams, enc: &Encryption, mu: [u8; 32], spoil: Spoil) -> Instance {
     let (d, k) = (p.d, p.k);
     let mut c1 = enc.c1.clone();
@@ -112,15 +166,10 @@ pub fn instance(p: &PkeParams, enc: &Encryption, mu: [u8; 32], spoil: Spoil) -> 
         e1[0] = NOISE;
         c1[0] = c1[0].wrapping_add(delta);
     }
-    let ct_coefs: Vec<i64> = c1.iter().chain(&enc.c2).copied().collect();
-    let ct_cells = (d + k).div_ceil(2);
-    let pk_coefs: Vec<i64> = enc.a.iter().chain(&enc.b).copied().collect();
-    let pk_bytes = bytes_of(&pk_coefs, d);
-    let ct_bytes = bytes_of(&ct_coefs, ct_cells);
-    let hpk: [u8; 32] = Keccak256::digest(&pk_bytes).into();
-    let hct: [u8; 32] = Keccak256::digest(&ct_bytes).into();
-    let inner: [u8; 32] = Keccak256::digest([hpk, hct].concat()).into();
-    let digest: [u8; 32] = Keccak256::digest([inner, mu].concat()).into();
+    let pub_ = Public::of(enc, &c1, mu);
+    let ct_cells = pub_.ct_cells.len();
+    let pk_coefs = pub_.pk_coefs.clone();
+    let digest = pub_.digest;
 
     // s: r reversed; J its support.
     let s: Vec<i64> = (0..d).map(|j| enc.r[d - 1 - j]).collect();
@@ -139,9 +188,16 @@ pub fn instance(p: &PkeParams, enc: &Encryption, mu: [u8; 32], spoil: Spoil) -> 
     let mut carry = Vec::new();
     let push_noise = |e: i64, e_stream: &mut Vec<Vec<F192>>| {
         let x = e + NOISE;
-        assert!((0..4 * 65_536).contains(&x) || spoil != Spoil::None, "noise out of bound");
+        assert!(
+            (0..4 * 65_536).contains(&x) || spoil != Spoil::None,
+            "noise out of bound"
+        );
         let (u, v) = (x & 0xffff, x >> 16);
-        e_stream.push(vec![gp(i128::from(u)), F192::new((v & 1) as u64, 0, 0), F192::new(((v >> 1) & 1) as u64, 0, 0)]);
+        e_stream.push(vec![
+            gp(i128::from(u)),
+            F192::new((v & 1) as u64, 0, 0),
+            F192::new(((v >> 1) & 1) as u64, 0, 0),
+        ]);
     };
     let carries = |sl: i128, sh: i128, e: i128, c: i64, extra_hi: i128| -> Vec<F192> {
         let (cl, ch) = halves(c);
@@ -156,7 +212,12 @@ pub fn instance(p: &PkeParams, enc: &Encryption, mu: [u8; 32], spoil: Spoil) -> 
     for n in 0..d {
         let (mut sl, mut sh) = (0i128, 0i128);
         for &j in &jset {
-            let (l, h) = if j <= n { halves(enc.a[n - j]) } else { let (l, h) = halves(enc.a[n + d - j]); (-l, -h) };
+            let (l, h) = if j <= n {
+                halves(enc.a[n - j])
+            } else {
+                let (l, h) = halves(enc.a[n + d - j]);
+                (-l, -h)
+            };
             sl += l;
             sh += h;
         }
@@ -169,14 +230,29 @@ pub fn instance(p: &PkeParams, enc: &Encryption, mu: [u8; 32], spoil: Spoil) -> 
         let (mut sl, mut sh) = (0i128, 0i128);
         for &j in &jset {
             let u = i + j;
-            let (l, h) = if u < d { halves(enc.b[d - 1 - u]) } else { let (l, h) = halves(enc.b[2 * d - 1 - u]); (-l, -h) };
+            let (l, h) = if u < d {
+                halves(enc.b[d - 1 - u])
+            } else {
+                let (l, h) = halves(enc.b[2 * d - 1 - u]);
+                (-l, -h)
+            };
             sl += l;
             sh += h;
         }
         push_noise(enc.e2[i], &mut e_stream);
         let m = enc.m[i];
-        m_stream.push((0..4).map(|b| F192::new(((m >> b) & 1) as u64, 0, 0)).collect());
-        carry.push(carries(sl, sh, i128::from(enc.e2[i]), enc.c2[i], i128::from(m) << 27));
+        m_stream.push(
+            (0..4)
+                .map(|b| F192::new(((m >> b) & 1) as u64, 0, 0))
+                .collect(),
+        );
+        carry.push(carries(
+            sl,
+            sh,
+            i128::from(enc.e2[i]),
+            enc.c2[i],
+            i128::from(m) << 27,
+        ));
     }
 
     let y = F192::new(0, 1, 0);
@@ -185,17 +261,28 @@ pub fn instance(p: &PkeParams, enc: &Encryption, mu: [u8; 32], spoil: Spoil) -> 
         ("D_PLACEHOLDER", d.to_string()),
         ("K_PLACEHOLDER", k.to_string()),
         ("CT_PLACEHOLDER", ct_cells.to_string()),
-        ("Y_TOWER_PLACEHOLDER", (u128::from(y.c0) | (u128::from(y.c1) << 64)).to_string()),
-        ("Y_INV_PLACEHOLDER", format!("f192({},{},{})", yi.c0, yi.c1, yi.c2)),
+        (
+            "Y_TOWER_PLACEHOLDER",
+            (u128::from(y.c0) | (u128::from(y.c1) << 64)).to_string(),
+        ),
+        (
+            "Y_INV_PLACEHOLDER",
+            format!("f192({},{},{})", yi.c0, yi.c1, yi.c2),
+        ),
     ]
     .into_iter()
     .map(|(a, b)| (a.to_owned(), b))
     .collect();
-    let mu_cells = cells_of(&mu);
     let streams = vec![
-        ("pk".to_owned(), pair_cells(&pk_coefs).into_iter().map(|c| vec![c]).collect()),
-        ("ct".to_owned(), pair_cells(&ct_coefs).into_iter().map(|c| vec![c]).collect()),
-        ("mu".to_owned(), vec![mu_cells.to_vec()]),
+        (
+            "pk".to_owned(),
+            pub_.pk_cells.iter().map(|&c| vec![c]).collect(),
+        ),
+        (
+            "ct".to_owned(),
+            pub_.ct_cells.iter().map(|&c| vec![c]).collect(),
+        ),
+        ("mu".to_owned(), vec![cells_of(&mu).to_vec()]),
         ("nj".to_owned(), vec![vec![gp(jset.len() as i128)]]),
         ("nb".to_owned(), vec![vec![gp(blocks as i128)]]),
         ("jp".to_owned(), jp),
@@ -204,5 +291,13 @@ pub fn instance(p: &PkeParams, enc: &Encryption, mu: [u8; 32], spoil: Spoil) -> 
         ("carry".to_owned(), carry),
         ("m".to_owned(), m_stream),
     ];
-    Instance { replacements, streams, pk_bytes, ct_bytes, digest, public: cells_of(&digest) }
+    let _ = &pk_coefs;
+    Instance {
+        replacements,
+        streams,
+        pk_bytes: pub_.pk_bytes,
+        ct_bytes: pub_.ct_bytes,
+        digest,
+        public: cells_of(&digest),
+    }
 }
