@@ -213,10 +213,10 @@ fn hand_in(w: &[Witness]) -> anyhow::Result<()> {
         let key = keccak256([&[0x10u8][..], x.message.as_slice(), x.key.as_slice()].concat());
         let body = json!({
             "publicKey": x.key,
-            "signature": format!("0x{}", common::hex(&x.signature)),
+            "signature": common::hex(&x.signature),
             "message": x.message,
         });
-        fs::write(std::path::Path::new(&dir).join(format!("w-{}.json", common::hex(key.as_slice()))), body.to_string())?;
+        fs::write(std::path::Path::new(&dir).join(format!("w-{}.json", ::hex::encode(key))), body.to_string())?;
     }
     Ok(())
 }
@@ -407,7 +407,7 @@ fn issue(
             .map_err(|e| anyhow::anyhow!("an answer does not check: {e:?}"))?;
         answers.push(a);
     }
-    let seen = json!({ "blinded": format!("0x{}", common::hex(&blinded.encode())), "requestKeccak": keccak256(&request) });
+    let seen = json!({ "blinded": common::hex(&blinded.encode()), "requestKeccak": keccak256(&request) });
     Ok((answers, seen))
 }
 
@@ -655,13 +655,13 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
         "arm": [4, 5],
         "run": run,
         "chain": "ethrex Hegota testnet, EIP-8288 modelled",
-        "committeeKey": format!("0x{}", common::hex(&committee.sharing.public().encode())),
+        "committeeKey": common::hex(&committee.sharing.public().encode()),
         "epoch": epoch,
         "paymaster": pm.address(),
         "account": acct.address(),
         "freshSender": fresh_acct.address(),
         "recipient": to_acct.address(),
-        "tickets": tickets.iter().map(|t| json!({ "sender": t.claim.claim.slot.sender, "binder": t.claim.binder, "point": format!("0x{}", common::hex(&t.claim.point().encode())) })).collect::<Vec<_>>(),
+        "tickets": tickets.iter().map(|t| json!({ "sender": t.claim.claim.slot.sender, "binder": t.claim.binder, "point": common::hex(&t.claim.point().encode()) })).collect::<Vec<_>>(),
         "issuers": issuers_saw,
         "steps": steps,
         "spends": spends,
