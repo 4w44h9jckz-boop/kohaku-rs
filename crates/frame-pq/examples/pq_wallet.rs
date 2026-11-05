@@ -19,7 +19,8 @@
 //! `X14_WITNESS_DIR`, where each signature is handed in before its transaction; and with
 //! `PRIVATE_KEY` unset the funder is the leanSPHINCS account `sphincs/funder`, which the genesis
 //! funds (`MODE=addresses` prints it). `BOARD` and `POOL` override experiment 33's board and
-//! experiment 06's keyed pool. `SEND_COPY_A=1` also sends arm 5's raised-fee copy.
+//! experiment 06's keyed pool. `SEND_COPY_A=1` also sends arm 5's raised-fee copy, to
+//! `COPY_A_RPC_URL` when set (a node that checks dependencies' signatures before admission).
 //!
 //! `MODE=new` writes a fresh mnemonic to `SEED_FILE` (mode 0600). `MODE=signer` (arm 1) times key
 //! generation, signing and verification. `MODE=account` (arm 2): the funder deploys account 0
@@ -599,10 +600,20 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
         let holds = verify(pool_binder.public_key(), c.sig_hash(), &w[0].signature)?;
         println!("copy (a): simulation valid {}; the binder's signature over its hash verifies: {holds}", sim.valid);
         let sent = if send_copy_a {
-            match rpc::send(provider, &c).await {
+            // To COPY_A_RPC_URL when set: a node that checks each dependency's signature before
+            // admission. Sent to a node that does not (plain ethrex), the copy is admitted, and a
+            // block that includes it is never proved, which stops the chain.
+            let url = env::var("COPY_A_RPC_URL").ok().filter(|u| !u.is_empty());
+            let answer = match &url {
+                Some(u) => rpc::send(&ProviderBuilder::new().connect_http(u.parse()?), &c).await,
+                None => rpc::send(provider, &c).await,
+            };
+            let mut v = match answer {
                 Ok(h) => json!({ "result": h }),
                 Err(e) => json!({ "error": e.to_string() }),
-            }
+            };
+            v["sentTo"] = json!(url.unwrap_or_else(|| "RPC_URL".to_owned()));
+            v
         } else {
             Value::Null
         };
