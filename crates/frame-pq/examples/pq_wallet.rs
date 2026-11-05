@@ -89,6 +89,7 @@ use kohaku_frame_pq::{
     binder, envelope, owner, recipient,
     seal::{self, SealKey},
     sender,
+    pool::DependencyPool,
     ticket::{PqBoundClaim, PqBoundTicket, PqBoundTicketPaymaster},
     verify,
 };
@@ -416,6 +417,7 @@ fn issue(
 #[allow(clippy::too_many_arguments)]
 async fn withdrawal<P: Provider>(
     provider: &P,
+    p: FramePool,
     chain_id: u64,
     note: Note,
     leaf: usize,
@@ -424,7 +426,6 @@ async fn withdrawal<P: Provider>(
     pay: Frame,
     fees: Fees,
 ) -> anyhow::Result<FrameTx> {
-    let p = pool();
     let leaves = kohaku_frame_pool::chain::leaves(provider, p.address, leaf).await?;
     let root = B256::from(MerkleTree::from_leaves(&leaves)?.root()?);
     let slot = root_slot(provider, p.address, deposit_block, root)
@@ -487,22 +488,33 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
         carrier: carrier()?,
         salt: B256::from(rng.random::<[u8; 32]>()),
     };
+    // With the dependency carrier the withdrawal carries a dependency frame, which experiment
+    // 06's pool refuses in its VERIFY: the pool is then its variant, with the same verifier,
+    // hasher and denomination, deployed here if it is not yet.
+    let (fpool, pool_deploy) = if carrier()? == Carrier::Dependency {
+        let code = provider.get_code_at(keyed_pool()?).await?;
+        let dp = DependencyPool::like(&code, keccak256("exp-frames/49/dependency-pool")).context("experiment 06's pool has no code here")?;
+        let absent = provider.get_code_at(dp.address()).await?.is_empty();
+        (FramePool { address: dp.address(), mode: PoolMode::Keyed, salt: dp.salt }, absent.then(|| dp.deploy_frame()))
+    } else {
+        (pool(), None)
+    };
     let note: Note = rng.random();
-    let deposit = Frame::sender(Some(keyed_pool()?))
+    let deposit = Frame::sender(Some(fpool.address))
         .with_value(U256::from(DENOMINATION))
         .with_data(depositCall { commitment: B256::from(note.commitment()) }.abi_encode())
         .with_execution(1_500_000)
         .with_state(3_000_000);
     let envelope = Envelope::fetch(provider, acct.address(), vec![U256::ZERO], TIP).await?;
     let mut tx = TxPlan::new(&by_owner)
-        .calls([pm.deploy_frame(), pm.buy_frame(2), deposit])
+        .calls(pool_deploy.into_iter().chain([pm.deploy_frame(), pm.buy_frame(2), deposit]))
         .build(&envelope)?;
     let w = authorise(&mut tx, &by_owner.keys())?;
     let mut s = mined(provider, &tx, "account 0 deploys the leanSPHINCS bound paymaster, buys 2 tickets and deposits a note").await?;
     s["witnesses"] = Value::Array(w.iter().map(witness_json).collect::<Result<_, _>>()?);
     let block = s["block"].as_str().map_or(Ok(0), |b| u64::from_str_radix(b.trim_start_matches("0x"), 16))?;
     steps.push(s);
-    let leaf = pool_events(provider, keyed_pool()?, block)
+    let leaf = pool_events(provider, fpool.address, block)
         .await?
         .into_iter()
         .find_map(|e| match e {
@@ -523,7 +535,7 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
         Slot { chain_id, sender: fresh_acct.address(), nonce_keys: vec![U256::ZERO], nonce_seq: 0 },
         Slot {
             chain_id,
-            sender: keyed_pool()?,
+            sender: fpool.address,
             nonce_keys: vec![U256::from_be_bytes(B256::from(note.nullifier_hash()).0)],
             nonce_seq: 0,
         },
@@ -568,7 +580,7 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
     // 4. The withdrawal to the leanSPHINCS recipient, paid by ticket 1; its copies first.
     let pool_binder = binder(&seed, k_pool);
     let wfees = rpc::suggest_fees(provider, WITHDRAWAL_TIP).await?;
-    let mut original = withdrawal(provider, chain_id, note.clone(), leaf.leaf_index as usize, leaf.block_number, to_acct.address(), pm.pay_frame(&tickets[1], &pool_binder, 0), wfees).await?;
+    let mut original = withdrawal(provider, fpool, chain_id, note.clone(), leaf.leaf_index as usize, leaf.block_number, to_acct.address(), pm.pay_frame(&tickets[1], &pool_binder, 0), wfees).await?;
     let w = authorise(&mut original, &[&pool_binder])?;
     let dependency = carrier()? == Carrier::Dependency;
     let pay = original.frames.iter().position(|f| f.target == Some(pm.address())).context("the pay frame")?;
@@ -658,6 +670,7 @@ async fn tickets<P: Provider>(provider: &P) -> anyhow::Result<()> {
         "committeeKey": common::hex(&committee.sharing.public().encode()),
         "epoch": epoch,
         "paymaster": pm.address(),
+        "pool": fpool.address,
         "account": acct.address(),
         "freshSender": fresh_acct.address(),
         "recipient": to_acct.address(),

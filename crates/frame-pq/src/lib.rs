@@ -27,6 +27,7 @@
 
 pub mod account;
 pub mod envelope;
+pub mod pool;
 pub mod seal;
 pub mod ticket;
 
