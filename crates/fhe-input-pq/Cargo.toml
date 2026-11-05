@@ -1,0 +1,22 @@
+[package]
+name = "kohaku-fhe-input-pq"
+version = "0.1.0"
+edition = "2024"
+
+# A TFHE compact public-key ciphertext's well-formedness proved by one leanVM program
+# (`exp-frames` experiment 41's post-quantum run). leanVM at 3cbac04 (MIT or Apache-2.0). Build with
+# RUSTFLAGS="-C target-cpu=native", as leanVM's own workspace does, or its times are not comparable.
+[dependencies]
+anyhow = { workspace = true }
+bench = { git = "https://github.com/leanEthereum/leanVM", rev = "3cbac047160f4d1465bfe985521603b0a3418556" }
+bincode = "1"
+kohaku-fhe-input = { path = "../fhe-input" }
+lean_compiler = { git = "https://github.com/leanEthereum/leanVM", rev = "3cbac047160f4d1465bfe985521603b0a3418556" }
+leanvm_core = { git = "https://github.com/leanEthereum/leanVM", rev = "3cbac047160f4d1465bfe985521603b0a3418556" }
+primitives = { git = "https://github.com/leanEthereum/leanVM", rev = "3cbac047160f4d1465bfe985521603b0a3418556" }
+rand08 = { package = "rand", version = "0.8" }
+serde_json = { workspace = true }
+sha3 = "0.10"
+
+[lints]
+workspace = true

@@ -1006,6 +1006,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
+name = "ansi_term"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d52a9bb7ec0cf484c551830a7ce27bd20d67eac647e1befb56b0be4ee39a55d2"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2091,6 +2100,18 @@ name = "bech32"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
+
+[[package]]
+name = "bench"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
+dependencies = [
+ "libc",
+ "primitives",
+ "tikv-jemallocator",
+ "tracing-forest",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "bincode"
@@ -3798,6 +3819,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
+name = "fiat_shamir"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
+dependencies = [
+ "parallel",
+ "primitives",
+ "serde",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4918,6 +4949,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "keccak_gkr"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
+dependencies = [
+ "fiat_shamir",
+ "parallel",
+ "pcs",
+ "primitives",
+ "tracing",
+]
+
+[[package]]
 name = "kem"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4969,6 +5012,22 @@ dependencies = [
  "serde",
  "serde_json",
  "tfhe-zk-pok",
+]
+
+[[package]]
+name = "kohaku-fhe-input-pq"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bench",
+ "bincode",
+ "kohaku-fhe-input",
+ "lean_compiler",
+ "leanvm_core",
+ "primitives",
+ "rand 0.8.8",
+ "serde_json",
+ "sha3 0.10.9",
 ]
 
 [[package]]
@@ -5461,6 +5520,29 @@ name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+
+[[package]]
+name = "lean_compiler"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
+dependencies = [
+ "leanvm_core",
+ "primitives",
+]
+
+[[package]]
+name = "leanvm_core"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
+dependencies = [
+ "fiat_shamir",
+ "keccak_gkr",
+ "parallel",
+ "pcs",
+ "primitives",
+ "tracing",
+ "verifier",
+]
 
 [[package]]
 name = "libc"
@@ -6095,6 +6177,17 @@ checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
 dependencies = [
  "digest 0.10.7",
  "hmac 0.12.1",
+]
+
+[[package]]
+name = "pcs"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
+dependencies = [
+ "fiat_shamir",
+ "parallel",
+ "primitives",
+ "tracing",
 ]
 
 [[package]]
@@ -8223,6 +8316,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tikv-jemalloc-sys"
+version = "0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a2825c78386b4ae0314074867860ba9577875de945f05992c38815cbec327f0"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "tikv-jemallocator"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "249f09e49ab1609436f34c776e84231bead18d6a955f119f939bdc1d847561bd"
+dependencies = [
+ "libc",
+ "tikv-jemalloc-sys",
+]
+
+[[package]]
 name = "time"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8532,6 +8645,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-forest"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f09cb459317a3811f76644334473239d696cd8efc606963ae7d1c308cead3b74"
+dependencies = [
+ "ansi_term",
+ "smallvec",
+ "thiserror 2.0.20",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-log"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8759,6 +8885,11 @@ dependencies = [
  "syn 2.0.119",
  "zstd",
 ]
+
+[[package]]
+name = "verifier"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=3cbac047160f4d1465bfe985521603b0a3418556#3cbac047160f4d1465bfe985521603b0a3418556"
 
 [[package]]
 name = "version_check"

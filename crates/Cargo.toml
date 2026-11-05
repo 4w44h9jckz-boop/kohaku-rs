@@ -2,6 +2,7 @@
 members = [
     "checked-read",
     "fhe-input",
+    "fhe-input-pq",
     "fork-kit",
     "frame-accounts",
     "frame-device-key",
