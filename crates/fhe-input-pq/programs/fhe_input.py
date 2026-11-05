@@ -111,7 +111,7 @@ def carried(sum_g, e_g, coef_g, k):
 
 def check_coef(sl, sh, el, ch, cl, cg, extra_hi):
     # One coefficient: low halves carry kappa into the high halves, which carry tau out.
-    gk = carried(sl, el, cl, cg[0])
+    gk = carried(sl, el, cl, cg[1])
     gt = carried(sh * extra_hi, gk, ch, cg[GEN])
     return
 

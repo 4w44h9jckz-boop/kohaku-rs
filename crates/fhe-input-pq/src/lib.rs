@@ -17,6 +17,10 @@ use kohaku_fhe_input::{Encryption, PkeParams};
 use primitives::field::{F192, g_pow};
 use sha3::{Digest, Keccak256};
 
+/// A primitive element of GF(2^192)^*, whose powers carry coefficient sums (pinned by
+/// `tests/generator.rs`).
+pub const H: F192 = F192::new(7, 8, 0);
+
 /// The program's source.
 pub const PROGRAM: &str = include_str!("../programs/fhe_input.py");
 /// `g`'s multiplicative order: exponents are taken modulo it.
@@ -133,7 +137,7 @@ pub fn instance(p: &PkeParams, enc: &Encryption, mu: [u8; 32], spoil: Spoil) -> 
 
     let mut e_stream = Vec::new();
     let mut carry = Vec::new();
-    let mut push_noise = |e: i64, e_stream: &mut Vec<Vec<F192>>| {
+    let push_noise = |e: i64, e_stream: &mut Vec<Vec<F192>>| {
         let x = e + NOISE;
         assert!((0..4 * 65_536).contains(&x) || spoil != Spoil::None, "noise out of bound");
         let (u, v) = (x & 0xffff, x >> 16);
