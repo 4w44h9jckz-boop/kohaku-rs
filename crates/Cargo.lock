@@ -5018,16 +5018,22 @@ dependencies = [
 name = "kohaku-fhe-input-pq"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "anyhow",
  "bench",
  "bincode",
  "kohaku-fhe-input",
+ "kohaku-frame-accounts",
+ "kohaku-frame-kit",
+ "kohaku-frame-pq",
+ "kohaku-frame-secrets",
  "lean_compiler",
  "leanvm_core",
  "primitives",
  "rand 0.8.8",
  "serde_json",
  "sha3 0.10.9",
+ "tokio",
 ]
 
 [[package]]
