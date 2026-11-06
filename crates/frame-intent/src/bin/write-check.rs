@@ -163,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
         (sim, a.fee_recipient.unwrap_or(Address::ZERO))
     };
 
-    let verdict = check(&tx, &sim, &intent, fee_recipient);
+    let verdict = check(&tx, &sim, &intent, fee_recipient, a.rules);
     let payer = sim.payer.unwrap_or(tx.sender);
     let writes_q = assert_writes(&verdict, payer);
     let named_q = assert_named(&verdict, &intent);

@@ -13,13 +13,19 @@ use serde::{Deserialize, Serialize};
 pub enum Contract {
     /// `balanceOf` and `allowance` mappings at these declaration slots.
     #[serde(rename_all = "camelCase")]
-    Erc20 { balance_slot: u64, allowance_slot: u64 },
+    Erc20 {
+        balance_slot: u64,
+        allowance_slot: u64,
+    },
     /// `isApprovedForAll` at this declaration slot.
     #[serde(rename_all = "camelCase")]
     Collection { operator_slot: u64 },
     /// An account keeping its owner and its implementation in storage.
     #[serde(rename_all = "camelCase")]
-    Account { owner_slot: U256, implementation_slot: U256 },
+    Account {
+        owner_slot: U256,
+        implementation_slot: U256,
+    },
     /// A pool marking spent nullifiers in a mapping at this declaration slot.
     #[serde(rename_all = "camelCase")]
     Pool { nullifier_slot: u64 },
@@ -79,13 +85,19 @@ mod tests {
         .unwrap();
         assert_eq!(
             r.get(address!("0x2700000000000000000000000000000000000010")),
-            Some(&Contract::Erc20 { balance_slot: 3, allowance_slot: 4 })
+            Some(&Contract::Erc20 {
+                balance_slot: 3,
+                allowance_slot: 4
+            })
         );
     }
 
     #[test]
     fn nested_is_keccak_of_keccak() {
         let (a, b) = (Address::repeat_byte(1), Address::repeat_byte(2));
-        assert_eq!(nested_slot(a, b, 4), mapping_slot(key(b), address_slot(a, 4).into()));
+        assert_eq!(
+            nested_slot(a, b, 4),
+            mapping_slot(key(b), address_slot(a, 4).into())
+        );
     }
 }

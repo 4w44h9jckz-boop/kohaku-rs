@@ -34,7 +34,12 @@ pub fn assert_writes(v: &Verdict, payer: Address) -> Option<Bytes> {
     }
     let mut slots = Vec::new();
     let mut balances = Vec::new();
-    let changes = v.matched.iter().map(|m| m.change).chain(v.exempt.iter().filter(|e| e.kind.starts_with("nonce: the nonce manager")).map(|e| e.change));
+    let changes = v.matched.iter().map(|m| m.change).chain(
+        v.exempt
+            .iter()
+            .filter(|e| e.kind.starts_with("nonce: the nonce manager"))
+            .map(|e| e.change),
+    );
     for c in changes {
         match c.field {
             Field::Storage(s) => slots.push((c.address, s, c.after)),
@@ -67,8 +72,16 @@ pub fn assert_named(v: &Verdict, intent: &Intent) -> Option<Bytes> {
     }
     let mut out = ASSERT_NAMED.to_vec();
     for m in &v.matched {
-        let Some(a) = intent.allowed.iter().find(|a| a.address == m.change.address && a.field == m.change.field) else { continue };
-        let Some((target, call)) = &a.getter else { continue };
+        let Some(a) = intent
+            .allowed
+            .iter()
+            .find(|a| a.address == m.change.address && a.field == m.change.field)
+        else {
+            continue;
+        };
+        let Some((target, call)) = &a.getter else {
+            continue;
+        };
         out.extend(target.into_word().as_slice());
         out.extend(word(m.change.after));
         out.extend(word(U256::from(call.len())));
@@ -94,7 +107,9 @@ pub fn named_entries(data: &[u8]) -> usize {
 
 #[derive(Debug, thiserror::Error)]
 pub enum BatchError {
-    #[error("the last frame is not the account's own assert(Q) frame (a SENDER frame to the sender, selector 0x682c9c89)")]
+    #[error(
+        "the last frame is not the account's own assert(Q) frame (a SENDER frame to the sender, selector 0x682c9c89)"
+    )]
     NoCheckFrame,
     #[error(transparent)]
     Sign(#[from] SignError),
@@ -104,7 +119,11 @@ pub enum BatchError {
 /// ending in the check, and every entry signed again by `key`.
 pub fn sign_batch(tx: &FrameTx, q: &Bytes, key: &FrameSigner) -> Result<FrameTx, BatchError> {
     let mut out = tx.clone();
-    let last = out.frames.len().checked_sub(1).ok_or(BatchError::NoCheckFrame)?;
+    let last = out
+        .frames
+        .len()
+        .checked_sub(1)
+        .ok_or(BatchError::NoCheckFrame)?;
     let check = &out.frames[last];
     let to_sender = check.target.is_none_or(|t| t == tx.sender);
     if check.mode != mode::SENDER || !to_sender || check.data.get(..4) != Some(&ASSERT_NAMED[..]) {
@@ -112,7 +131,10 @@ pub fn sign_batch(tx: &FrameTx, q: &Bytes, key: &FrameSigner) -> Result<FrameTx,
     }
     let entries = named_entries(q) as u64;
     out.frames[last].data = q.clone();
-    out.frames[last].limits.execution = out.frames[last].limits.execution.max(30_000 + 8_000 * entries);
+    out.frames[last].limits.execution = out.frames[last]
+        .limits
+        .execution
+        .max(30_000 + 8_000 * entries);
     for f in &mut out.frames[..last] {
         if f.mode != mode::VERIFY {
             f.flags |= ATOMIC_BATCH_FLAG;
