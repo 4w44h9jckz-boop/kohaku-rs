@@ -202,7 +202,7 @@ async fn case_h<P: Provider>(mut r: Run<P>, e: u64, run: &str) -> anyhow::Result
     let max = kohaku_frame_kit::gas::max_cost(&roll, 0)?;
     if surplus < max {
         let top = max * U256::from(2);
-        let v = r.funder_tx(vec![Frame::sender(Some(r.address())).with_value(top).with_execution(30_000)], "a plain transfer to the account's surplus").await?;
+        let v = r.funder_tx(vec![Frame::sender(Some(r.address())).with_value(top).with_execution(40_000).with_state(kohaku_frame_kit::constants::STORAGE_SET_STATE_GAS)], "a plain transfer to the account's surplus").await?;
         r.record.push(json!({ "case": "h", "what": "surplus top-up", "value": top, "tx": v }));
     }
     let (out0, sur0, bal0) = r.money().await?;
