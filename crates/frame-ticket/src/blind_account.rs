@@ -42,6 +42,8 @@ pub const BUY: [u8; 4] = [0x21, 0x5a, 0xdc, 0x4a];
 pub const PAYOUT: [u8; 4] = [0x42, 0x3b, 0x21, 0xcd];
 /// `claim()`.
 pub const CLAIM: [u8; 4] = [0x4e, 0x71, 0xd9, 0x2d];
+/// `rollover(uint256,uint64,address,uint256)`: version 2's trade at epoch end.
+pub const ROLLOVER: [u8; 4] = [0x07, 0x99, 0x08, 0x1a];
 /// The payout frame's execution budget: the account's `VERIFY` requires at least 100,000, and the
 /// payout holds 60,000 back from its call to the recipient.
 pub const PAYOUT_EXECUTION: u64 = 150_000;
@@ -72,7 +74,8 @@ pub fn chi(denomination: U256, epoch: u64) -> B256 {
     keccak256(b)
 }
 
-/// The account's storage slot for `burned[chi]` (0), `minted[chi]` (1) or `owed[addr]` (2).
+/// The account's storage slot for `burned[chi]` (0), `minted[chi]` (1) or `owed[addr]` (2); and
+/// with a zero key and 3, version 2's `outstanding`.
 #[must_use]
 pub fn slot(key: B256, which: u8) -> B256 {
     let mut b = [0u8; 64];
@@ -177,6 +180,17 @@ pub enum PayoutError {
 /// The payout of `tickets` to `to`: its two frames, its nonce keys (the serials, sorted) at
 /// sequence 0, and the binder's entry, unsigned.
 pub fn payout_tx(tickets: &[AccountTicket], to: Address, fees: Fees) -> Result<FrameTx, PayoutError> {
+    spend_tx(tickets, PAYOUT, to, fees)
+}
+
+/// The rollover of `tickets` into the next epoch's key (version 2): as a payout, with
+/// `rollover(D, e, 0, n)` in the second frame. No ETH moves; the fee comes from the account's
+/// surplus.
+pub fn rollover_tx(tickets: &[AccountTicket], fees: Fees) -> Result<FrameTx, PayoutError> {
+    spend_tx(tickets, ROLLOVER, Address::ZERO, fees)
+}
+
+fn spend_tx(tickets: &[AccountTicket], selector: [u8; 4], to: Address, fees: Fees) -> Result<FrameTx, PayoutError> {
     let n = tickets.len();
     if n == 0 || n > MAX_TICKETS {
         return Err(PayoutError::Count(n));
@@ -205,7 +219,7 @@ pub fn payout_tx(tickets: &[AccountTicket], to: Address, fees: Fees) -> Result<F
     }
     verify.extend_from_slice(&g1_eip2537(&sigma));
 
-    let mut call = PAYOUT.to_vec();
+    let mut call = selector.to_vec();
     call.extend_from_slice(&c.denomination.to_be_bytes::<32>());
     call.extend_from_slice(&U256::from(c.epoch).to_be_bytes::<32>());
     call.extend_from_slice(to.into_word().as_slice());

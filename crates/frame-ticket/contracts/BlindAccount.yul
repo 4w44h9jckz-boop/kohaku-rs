@@ -1,14 +1,21 @@
 // BlindAccount: ETH held for blind tickets, one count per key chi = keccak256(D || epoch), the two
 // as 32-byte words. Payouts under a key never exceed the purchases under it.
 //
-// Storage: burned[chi] at keccak256(chi || 0), minted[chi] at keccak256(chi || 1), and
-// owed[recipient] at keccak256(recipient || 2), what a payout could not send.
+// Version 2 (experiment 59's amendment 2): the value owed is kept, and a ticket can be rolled over
+// into the next epoch's key.
+//
+// Storage: burned[chi] at keccak256(chi || 0), minted[chi] at keccak256(chi || 1),
+// owed[recipient] at keccak256(recipient || 2), what a payout could not send, and outstanding at
+// keccak256(0 || 3), the value owed: D per unspent ticket, and every credit not yet claimed.
 //
 // buy(uint64 epoch)                           0x215adc4a  D = msg.value > 0: burned[chi] += 1
 // claim()                                     0x4e71d92d  sends owed[caller]
 // payout(uint256 D, uint64 e, address to, n)  0x423b21cd  only from itself, in a SENDER frame:
 //   minted[chi] += n (reverting past burned[chi]); sends n * D - maxCost to `to` holding back
 //   60,000 gas, and credits owed[to] if the send fails.
+// rollover(uint256 D, uint64 e, 0, n)         0x0799081a  only from itself, in a SENDER frame:
+//   minted[(D, e)] += n (reverting past burned), burned[(D, e + 1)] += n, logging Bought for the
+//   binder of the VERIFY frame. No ETH moves.
 //
 // VERIFY (frame 0, scope 3): the frame's data is
 //
@@ -43,6 +50,7 @@ object "BlindAccount" {
             let sel := shr(224, calldataload(0))
             if eq(caller(), address()) {
                 if eq(sel, 0x423b21cd) { payout() }
+                if eq(sel, 0x0799081a) { rollover() }
             }
             switch sel
             case 0x215adc4a { buy() }
@@ -69,6 +77,8 @@ object "BlindAccount" {
                 let s := slotOf(chi, 0)
                 let index := sload(s)
                 sstore(s, add(index, 1))
+                let os := slotOf(0, 3)
+                sstore(os, add(sload(os), d))
                 mstore(0, index)
                 // Bought(bytes32 indexed chi, address indexed buyer, uint256 index)
                 log3(0, 0x20, 0xffa101c6ca2880d2c4f3240ea96a0cdbac504f2ee13706c9cf67c1b27219df94, chi, caller())
@@ -79,6 +89,8 @@ object "BlindAccount" {
                 let s := slotOf(caller(), 2)
                 let amount := sload(s)
                 sstore(s, 0)
+                let os := slotOf(0, 3)
+                sstore(os, sub(sload(os), amount))
                 if iszero(call(gas(), caller(), amount, 0, 0, 0, 0)) { revert(0, 0) }
                 stop()
             }
@@ -94,15 +106,39 @@ object "BlindAccount" {
                 if gt(minted, sload(slotOf(chi, 0))) { revert(0, 0) }
                 sstore(ms, minted)
                 let amount := sub(mul(n, d), txparam(0x06))
+                let out := slotOf(0, 3)
+                let left := sub(sload(out), mul(n, d))
                 let sent := call(sub(gas(), 60000), to, amount, 0, 0, 0, 0)
                 if iszero(sent) {
                     let os := slotOf(to, 2)
                     sstore(os, add(sload(os), amount))
+                    left := add(left, amount)
                 }
+                sstore(out, left)
                 mstore(0, amount)
                 mstore(0x20, sent)
                 // Paid(bytes32 indexed chi, address indexed to, uint256 amount, bool sent)
                 log3(0, 0x40, 0x408247e89d39871c0cb4768c90199873315688a638cb09e6f8eeb7a32a5cf1eb, chi, to)
+                stop()
+            }
+
+            function rollover() {
+                let d := calldataload(4)
+                let epoch := calldataload(36)
+                let n := calldataload(100)
+                let ms := slotOf(chiOf(d, epoch), 1)
+                let minted := add(sload(ms), n)
+                if gt(minted, sload(slotOf(chiOf(d, epoch), 0))) { revert(0, 0) }
+                sstore(ms, minted)
+                let next := chiOf(d, add(epoch, 1))
+                let bs := slotOf(next, 0)
+                let index := sload(bs)
+                sstore(bs, add(index, n))
+                let binder := shr(96, framedataload(40, 0))
+                for { let i := 0 } lt(i, n) { i := add(i, 1) } {
+                    mstore(0, add(index, i))
+                    log3(0, 0x20, 0xffa101c6ca2880d2c4f3240ea96a0cdbac504f2ee13706c9cf67c1b27219df94, next, binder)
+                }
                 stop()
             }
 
@@ -125,7 +161,15 @@ object "BlindAccount" {
                 if frameparam(0x08, 1) { fail1() }
                 if lt(frameparam(0x01, 1), 100000) { fail1() }
                 if iszero(eq(frameparam(0x04, 1), 132)) { fail1() }
-                if iszero(eq(shr(224, framedataload(0, 1)), 0x423b21cd)) { fail1() }
+                let call1 := shr(224, framedataload(0, 1))
+                switch call1
+                case 0x423b21cd {}
+                case 0x0799081a {
+                    // A rollover: no recipient, and a surplus that pays its fee.
+                    if framedataload(68, 1) { fail1() }
+                    if lt(selfbalance(), add(sload(slotOf(0, 3)), txparam(0x06))) { fail1() }
+                }
+                default { fail1() }
                 if iszero(eq(framedataload(4, 1), d)) { fail1() }
                 if iszero(eq(framedataload(36, 1), epoch)) { fail1() }
                 if iszero(eq(framedataload(100, 1), n)) { fail1() }

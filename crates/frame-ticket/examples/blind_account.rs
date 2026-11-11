@@ -40,7 +40,7 @@ use kohaku_frame_kit::{
 };
 use kohaku_frame_ticket::{
     Committee, blind,
-    blind_account::{AccountClaim, AccountTicket, BlindAccount, CLAIM, NAMESPACE, chi, payout_tx, slot},
+    blind_account::{AccountClaim, AccountTicket, BlindAccount, CLAIM, NAMESPACE, chi, payout_tx, rollover_tx, slot},
     issuers::{Count, Ledger, request_id},
 };
 use rand::{SeedableRng, rngs::StdRng};
@@ -99,6 +99,12 @@ impl<P: Provider> Run<P> {
         let burned = self.provider.get_storage_at(self.address(), slot(c, 0).into()).await?;
         let minted = self.provider.get_storage_at(self.address(), slot(c, 1).into()).await?;
         Ok((burned, minted))
+    }
+
+    /// Version 2's `outstanding`, and the account's balance.
+    async fn money(&self) -> anyhow::Result<(U256, U256)> {
+        let out = self.provider.get_storage_at(self.address(), slot(B256::ZERO, 3).into()).await?;
+        Ok((out, self.provider.get_balance(self.address()).await?))
     }
 
     async fn owed(&self, to: Address) -> anyhow::Result<U256> {
@@ -177,6 +183,73 @@ impl<P: Provider> Run<P> {
     }
 }
 
+/// (h), on version 2: a ticket of epoch `e` traded at epoch end for one of `e + 1`, the new ticket
+/// spent, and the old one tried again three ways.
+#[allow(clippy::too_many_lines)]
+async fn case_h<P: Provider>(mut r: Run<P>, e: u64, run: &str) -> anyhow::Result<()> {
+    r.buy(e, 1).await?;
+    let b = r.key("binder/h");
+    let old = r.issue(e, b.address(), "h-old", true)?;
+    let fees = r.fees().await?;
+    let roll = {
+        let mut t = rollover_tx(std::slice::from_ref(&old), fees)?;
+        sign_all(&mut t, &[FrameSigner::Secp256k1(b.clone())])?;
+        t
+    };
+    // The surplus must cover the rollover's maximum cost; a fresh account has none.
+    let (out, bal) = r.money().await?;
+    let max = kohaku_frame_kit::gas::max_cost(&roll, 0)?;
+    if bal < out + max {
+        let top = (out + max - bal) * U256::from(2);
+        let v = r.funder_tx(vec![Frame::sender(Some(r.address())).with_value(top).with_execution(30_000)], "a plain transfer to the account's surplus").await?;
+        r.record.push(json!({ "case": "h", "what": "surplus top-up", "value": top, "tx": v }));
+    }
+    let (out0, bal0) = r.money().await?;
+    r.note("h", json!({ "before": { "outstanding": out0, "balance": bal0, "maxCost": max } })).await;
+    r.mined(&roll, "h", "the rollover of an epoch-e ticket into e+1").await?;
+    let (out1, bal1) = r.money().await?;
+    let (bo, mo) = r.count(D, e).await?;
+    let (bn, mn) = r.count(D, e + 1).await?;
+    r.note("h", json!({ "after": { "outstanding": out1, "balance": bal1, "feePaid": bal0 - bal1, "old": [bo, mo], "new": [bn, mn] } })).await;
+
+    // The new ticket: the issuers admit one request under the new key, by the rollover's binder.
+    r.ledgers.entry(chi(D, e + 1)).or_default().bought.insert(b.address(), 1);
+    let nb = r.key("binder/h-new");
+    let funder = r.funder.address();
+    let id_owner = std::mem::replace(&mut r.funder, b.clone());
+    let new = r.issue(e + 1, nb.address(), "h-new", true)?;
+    r.funder = id_owner;
+    let _ = funder;
+    let to = r.key("to/h").address();
+    let fees = r.fees().await?;
+    r.mined(&r.payout(std::slice::from_ref(&new), to, &nb, fees)?, "h", "the new ticket paid out, as in (a)").await?;
+    let (bn, mn) = r.count(D, e + 1).await?;
+    let (out2, _) = r.money().await?;
+    r.note("h", json!({ "afterNewPayout": { "new": [bn, mn], "outstanding": out2, "recipient": r.provider.get_balance(to).await? } })).await;
+
+    // The old ticket again.
+    r.refused(&roll, "h", "the rollover's bytes again").await?;
+    let mut seq1 = payout_tx(std::slice::from_ref(&old), to, r.fees().await?)?;
+    seq1.nonce_seq = 1;
+    sign_all(&mut seq1, &[FrameSigner::Secp256k1(b.clone())])?;
+    r.refused(&seq1, "h", "the old ticket paid out at sequence 1").await?;
+    let mut as_new = old.clone();
+    as_new.claim.epoch = e + 1;
+    as_new.claim.serial += U256::from(1);
+    let mut t = payout_tx(std::slice::from_ref(&as_new), to, r.fees().await?)?;
+    sign_all(&mut t, &[FrameSigner::Secp256k1(b.clone())])?;
+    r.refused(&t, "h", "the old ticket's signature presented under e+1").await?;
+
+    let out = json!({
+        "chainId": r.chain_id, "account": r.address(), "version": 2, "codeBytes": r.account.initcode().len(),
+        "denomination": D, "epoch": e, "run": run, "issuersSaw": r.seen, "steps": r.record,
+    });
+    let path = env::var("RECORD").unwrap_or_else(|_| "blind-account-h.json".to_owned());
+    fs::write(&path, serde_json::to_string_pretty(&out)?)?;
+    println!("record: {path}");
+    Ok(())
+}
+
 /// Creation code returning `runtime` (at most 32 bytes).
 fn tiny(runtime: &[u8]) -> Vec<u8> {
     let l = u8::try_from(runtime.len()).expect("short");
@@ -220,6 +293,10 @@ async fn main() -> anyhow::Result<()> {
     // A fresh epoch base per run, so that reruns under one RUN do not meet old counts.
     let base: u64 = r.provider.get_block_number().await?;
     let e = |k: u64| base * 100 + k;
+
+    if env::var("CASE").as_deref() == Ok("h") {
+        return case_h(r, e(1), &run).await;
+    }
 
     // (a) and (b): epoch e(1), two purchases.
     r.buy(e(1), 2).await?;
