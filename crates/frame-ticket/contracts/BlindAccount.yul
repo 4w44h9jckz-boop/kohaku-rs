@@ -6,11 +6,12 @@
 //
 // Storage: burned[chi] at keccak256(chi || 0), minted[chi] at keccak256(chi || 1),
 // owed[recipient] at keccak256(recipient || 2), what a payout could not send, and outstanding at
-// keccak256(0 || 3), the value owed: D per unspent ticket, and every credit not yet claimed.
+// keccak256(0 || 3), the value owed: D per unspent ticket, and every credit not yet claimed; and
+// surplus at keccak256(0 || 4), raised by plain transfers, lowered by each rollover's maximum cost.
 //
 // buy(uint64 epoch)                           0x215adc4a  D = msg.value > 0: burned[chi] += 1
 // claim()                                     0x4e71d92d  sends owed[caller]
-// (no calldata)                                           accepts ETH: the surplus
+// (no calldata)                                           accepts ETH: surplus += msg.value
 // payout(uint256 D, uint64 e, address to, n)  0x423b21cd  only from itself, in a SENDER frame:
 //   minted[chi] += n (reverting past burned[chi]); sends n * D - maxCost to `to` holding back
 //   60,000 gas, and credits owed[to] if the send fails.
@@ -49,7 +50,11 @@ object "BlindAccount" {
                 stop()
             }
             // A plain transfer adds to the surplus, which pays a rollover's fee.
-            if iszero(calldatasize()) { stop() }
+            if iszero(calldatasize()) {
+                let ss := slotOf(0, 4)
+                sstore(ss, add(sload(ss), callvalue()))
+                stop()
+            }
             let sel := shr(224, calldataload(0))
             if eq(caller(), address()) {
                 if eq(sel, 0x423b21cd) { payout() }
@@ -137,6 +142,8 @@ object "BlindAccount" {
                 let bs := slotOf(next, 0)
                 let index := sload(bs)
                 sstore(bs, add(index, n))
+                let ss := slotOf(0, 4)
+                sstore(ss, sub(sload(ss), txparam(0x06)))
                 let binder := shr(96, framedataload(40, 0))
                 for { let i := 0 } lt(i, n) { i := add(i, 1) } {
                     mstore(0, add(index, i))
@@ -170,7 +177,8 @@ object "BlindAccount" {
                 case 0x0799081a {
                     // A rollover: no recipient, and a surplus that pays its fee.
                     if framedataload(68, 1) { fail1() }
-                    if lt(selfbalance(), add(sload(slotOf(0, 3)), txparam(0x06))) { fail1() }
+                    // SELFBALANCE is banned in VERIFY: the surplus is counted (amendment 3).
+                    if lt(sload(slotOf(0, 4)), txparam(0x06)) { fail1() }
                 }
                 default { fail1() }
                 if iszero(eq(framedataload(4, 1), d)) { fail1() }

@@ -101,10 +101,11 @@ impl<P: Provider> Run<P> {
         Ok((burned, minted))
     }
 
-    /// Version 2's `outstanding`, and the account's balance.
-    async fn money(&self) -> anyhow::Result<(U256, U256)> {
+    /// Version 2's `outstanding` and `surplus`, and the account's balance.
+    async fn money(&self) -> anyhow::Result<(U256, U256, U256)> {
         let out = self.provider.get_storage_at(self.address(), slot(B256::ZERO, 3).into()).await?;
-        Ok((out, self.provider.get_balance(self.address()).await?))
+        let surplus = self.provider.get_storage_at(self.address(), slot(B256::ZERO, 4).into()).await?;
+        Ok((out, surplus, self.provider.get_balance(self.address()).await?))
     }
 
     async fn owed(&self, to: Address) -> anyhow::Result<U256> {
@@ -197,20 +198,20 @@ async fn case_h<P: Provider>(mut r: Run<P>, e: u64, run: &str) -> anyhow::Result
         t
     };
     // The surplus must cover the rollover's maximum cost; a fresh account has none.
-    let (out, bal) = r.money().await?;
+    let (_, surplus, _) = r.money().await?;
     let max = kohaku_frame_kit::gas::max_cost(&roll, 0)?;
-    if bal < out + max {
-        let top = (out + max - bal) * U256::from(2);
+    if surplus < max {
+        let top = max * U256::from(2);
         let v = r.funder_tx(vec![Frame::sender(Some(r.address())).with_value(top).with_execution(30_000)], "a plain transfer to the account's surplus").await?;
         r.record.push(json!({ "case": "h", "what": "surplus top-up", "value": top, "tx": v }));
     }
-    let (out0, bal0) = r.money().await?;
-    r.note("h", json!({ "before": { "outstanding": out0, "balance": bal0, "maxCost": max } })).await;
+    let (out0, sur0, bal0) = r.money().await?;
+    r.note("h", json!({ "before": { "outstanding": out0, "surplus": sur0, "balance": bal0, "maxCost": max } })).await;
     r.mined(&roll, "h", "the rollover of an epoch-e ticket into e+1").await?;
-    let (out1, bal1) = r.money().await?;
+    let (out1, sur1, bal1) = r.money().await?;
     let (bo, mo) = r.count(D, e).await?;
     let (bn, mn) = r.count(D, e + 1).await?;
-    r.note("h", json!({ "after": { "outstanding": out1, "balance": bal1, "feePaid": bal0 - bal1, "old": [bo, mo], "new": [bn, mn] } })).await;
+    r.note("h", json!({ "after": { "outstanding": out1, "surplus": sur1, "surplusSpent": sur0 - sur1, "balance": bal1, "feePaid": bal0 - bal1, "old": [bo, mo], "new": [bn, mn] } })).await;
 
     // The new ticket: the issuers admit one request under the new key, by the rollover's binder.
     r.ledgers.entry(chi(D, e + 1)).or_default().bought.insert(b.address(), 1);
@@ -224,7 +225,7 @@ async fn case_h<P: Provider>(mut r: Run<P>, e: u64, run: &str) -> anyhow::Result
     let fees = r.fees().await?;
     r.mined(&r.payout(std::slice::from_ref(&new), to, &nb, fees)?, "h", "the new ticket paid out, as in (a)").await?;
     let (bn, mn) = r.count(D, e + 1).await?;
-    let (out2, _) = r.money().await?;
+    let (out2, _, _) = r.money().await?;
     r.note("h", json!({ "afterNewPayout": { "new": [bn, mn], "outstanding": out2, "recipient": r.provider.get_balance(to).await? } })).await;
 
     // The old ticket again.
