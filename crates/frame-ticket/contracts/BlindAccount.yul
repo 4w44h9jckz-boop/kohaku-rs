@@ -10,6 +10,7 @@
 //
 // buy(uint64 epoch)                           0x215adc4a  D = msg.value > 0: burned[chi] += 1
 // claim()                                     0x4e71d92d  sends owed[caller]
+// (no calldata)                                           accepts ETH: the surplus
 // payout(uint256 D, uint64 e, address to, n)  0x423b21cd  only from itself, in a SENDER frame:
 //   minted[chi] += n (reverting past burned[chi]); sends n * D - maxCost to `to` holding back
 //   60,000 gas, and credits owed[to] if the send fails.
@@ -47,6 +48,8 @@ object "BlindAccount" {
                 if eq(frameparam(0x02, frame), 1) { validate(frame) }
                 stop()
             }
+            // A plain transfer adds to the surplus, which pays a rollover's fee.
+            if iszero(calldatasize()) { stop() }
             let sel := shr(224, calldataload(0))
             if eq(caller(), address()) {
                 if eq(sel, 0x423b21cd) { payout() }
