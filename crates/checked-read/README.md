@@ -35,6 +35,9 @@ through the top and the record's branch
 - `client`: `CheckedReader`, which accepts a value only when its branch proves it, treats a key
   with no record in its bucket as unanswered rather than as an empty account, and keeps evidence
   for each answer it refuses; and `CheckedLookup`, a `LookupBackend` for `kohaku-pir-rpc`'s router.
+  A record whose branch proves its address absent is accepted when it claims an empty account
+  (no balance, no nonce, no delegate), the state EIP-161 gives an absent address, and refused
+  otherwise. `judge` reads such a branch the same way.
 - `evidence`: a signed wrong answer as evidence, and `judge`, the third party. To make an answer
   evidence the reader opens its query, which tells whoever holds the evidence which bucket it read.
   `judge` checks the signature, the hint rows against the hint root, and that the query is an

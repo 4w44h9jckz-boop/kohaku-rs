@@ -24,6 +24,16 @@ pub struct AccountState {
 }
 
 impl AccountState {
+    /// The state an absent account reads as: no nonce, no balance, no storage, no code. Under
+    /// EIP-161 an account with none of these is not in the trie at all, and `eth_getBalance`,
+    /// `eth_getTransactionCount` and `eth_getCode` answer it with zeros.
+    pub const EMPTY: Self = Self {
+        nonce: 0,
+        balance: U256::ZERO,
+        storage_root: alloy::trie::EMPTY_ROOT_HASH,
+        code_hash: KECCAK256_EMPTY,
+    };
+
     /// The RLP list `[nonce, balance, storage_root, code_hash]`, the leaf's value.
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
@@ -154,6 +164,14 @@ fn path(address: Address) -> Vec<u8> {
         .iter()
         .flat_map(|b| [b >> 4, b & 0x0f])
         .collect()
+}
+
+/// Whether `value`, a table record's claim, is the account a branch settled as `state`: `Some`
+/// for an account the branch proves, `None` for one it proves absent, which reads as
+/// [`AccountState::EMPTY`].
+#[must_use]
+pub fn settles(state: Option<&AccountState>, value: &[u8; VALUE]) -> bool {
+    state.unwrap_or(&AccountState::EMPTY).is(value)
 }
 
 /// `address`'s account under `root`, from `nodes`: `Some` if a branch proves it, `None` if one

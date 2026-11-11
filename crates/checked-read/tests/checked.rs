@@ -388,3 +388,109 @@ async fn a_reader_cannot_frame_an_honest_server() {
         Err(Dismissed::Query(_))
     ));
 }
+
+/// `n` accounts as [`state`] builds them, and `absent`, an address with no account, given an
+/// entry anyway: no code, no balance, no nonce, with `eth_getProof`'s proof of absence. A table
+/// rule that admits every address it sees whose code is empty takes such an address, and
+/// `eth_getBalance` answers 0 for it.
+fn state_with_absent(
+    rng: &mut StdRng,
+    n: usize,
+    absent: Address,
+) -> (B256, BTreeMap<Address, Entry>) {
+    let (_, mut entries) = state(rng, n);
+    let mut leaves: Vec<(Nibbles, Address)> = entries
+        .keys()
+        .map(|a| (Nibbles::unpack(keccak256(a)), *a))
+        .collect();
+    leaves.sort();
+    let mut targets: Vec<Nibbles> = leaves.iter().map(|(k, _)| *k).collect();
+    targets.push(Nibbles::unpack(keccak256(absent)));
+    let mut hb = HashBuilder::default().with_proof_retainer(ProofRetainer::new(targets));
+    for (k, a) in &leaves {
+        hb.add_leaf(*k, &state_of(&entries[a].account).encode());
+    }
+    let root = hb.root();
+    let proofs = hb.take_proof_nodes();
+    for (k, a) in &leaves {
+        entries.get_mut(a).unwrap().proof = proofs
+            .matching_nodes_sorted(k)
+            .into_iter()
+            .map(|(_, n)| n)
+            .collect();
+    }
+    let absence = proofs
+        .matching_nodes_sorted(&Nibbles::unpack(keccak256(absent)))
+        .into_iter()
+        .map(|(_, n)| n)
+        .collect();
+    entries.insert(
+        absent,
+        Entry {
+            account: Account {
+                delegate: Address::ZERO,
+                balance: U256::ZERO,
+                nonce: 0,
+            },
+            proof: absence,
+        },
+    );
+    (root, entries)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_absent_address_in_the_table_reads_as_empty_and_frames_no_one() {
+    let mut rng = StdRng::seed_from_u64(11);
+    let mut committee = Committee::dkg(&mut rng, 4).unwrap();
+    let absent = Address::from(rng.random::<[u8; 20]>());
+    let (root, entries) = state_with_absent(&mut rng, 60, absent);
+    let header = header(root);
+    let chain: Nodes = entries[&absent].proof.iter().collect();
+    assert_eq!(
+        trie::account(root, absent, &chain),
+        Ok(None),
+        "the fixture proves the address absent"
+    );
+
+    // The read: the record claims an empty account, and the branch proves the address absent.
+    // An absent account reads as empty (EIP-161), so the record is the chain's answer.
+    let run = serve(&mut rng, &committee, &entries, 1, &header).await;
+    run.reader
+        .add_tickets([issue(&mut rng, &mut committee, run.server.manifest.server)]);
+    let got = run.reader.read(absent).await.unwrap();
+    assert!(matches!(got, Checked::Proven { .. }), "{got:?}");
+
+    // The judge, given an opened honest answer for that record, finds the server correct.
+    let m = run.server.manifest.clone();
+    let col = bucket(m.salt, absent.as_slice(), m.cols);
+    let a = pir::public_matrix(m.seed.0, m.cols);
+    let slot = {
+        let column = &run.table.db.data[col * m.rows..(col + 1) * m.rows];
+        kohaku_checked_read::table::find(column, m.record, absent.as_slice())
+            .unwrap()
+            .slot
+    };
+    let (q, secret) = pir::query(&mut rng, &a, m.cols, col);
+    let ticket = issue(&mut rng, &mut committee, m.server);
+    let (answer, sig) = run.reader.send(&q, &ticket).await.unwrap();
+    let ev = evidence_for(&run, &q, secret.open(), col, slot, &answer, sig);
+    assert_eq!(
+        judge(&ev, &header, &chain),
+        Ok(Verdict::Correct { address: absent })
+    );
+
+    // A server that claims a balance for the absent address is still wrong.
+    let mut lied = entries.clone();
+    lied.get_mut(&absent).unwrap().account.balance = U256::from(1);
+    let liar = serve(&mut rng, &committee, &lied, 1, &header).await;
+    liar.reader
+        .add_tickets([issue(&mut rng, &mut committee, liar.server.manifest.server)]);
+    let Checked::Refused { why, evidence } = liar.reader.read(absent).await.unwrap() else {
+        panic!("a balance for an absent address was accepted");
+    };
+    assert!(why.contains("absent"), "{why}");
+    assert!(matches!(
+        judge(&evidence, &header, &chain),
+        Ok(Verdict::Wrong { chain: None, .. })
+    ));
+}

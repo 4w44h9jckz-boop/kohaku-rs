@@ -159,8 +159,11 @@ pub fn judge(e: &Evidence, header: &Header, chain: &Nodes) -> Result<Verdict, Di
 
     // 5. The chain.
     let chain = trie::account(header.state_root, address, chain).map_err(Dismissed::Chain)?;
+    // An account the branch proves absent reads as empty (EIP-161): a record claiming exactly
+    // that is the chain's answer, so an honest server whose table holds such an address is not
+    // found wrong.
     Ok(match chain {
-        Some(st) if st.is(&signed) => Verdict::Correct { address },
+        ref st if trie::settles(st.as_ref(), &signed) => Verdict::Correct { address },
         _ => Verdict::Wrong {
             address,
             signed,
