@@ -13,10 +13,11 @@
 //! - (a) an honest payout; (b) its replay, and the ticket again at sequence 1;
 //! - (c2) a ticket the issuers signed with no purchase, while an honest one is outstanding, then
 //!   that honest one; (c) another such ticket once the key is exhausted;
-//! - (d) two payouts under a key with one unit left, sent before either is mined;
+//! - (d) two payouts under a key with one unit left: the second while the first is pending, and
+//!   again once it is mined;
 //! - (e) payouts to a recipient that reverts, and to one that burns all the gas it is given;
 //! - (f) copies of a pending payout redirected: binder's entry kept, removed, another binder;
-//! - (g) aggregate payouts of 2, 4 and 8 tickets.
+//! - (g) aggregate payouts of 2, 4 and 5 tickets, and 6, past the prefix's state-gas cap.
 
 use std::{collections::BTreeMap, env, fs, time::Duration};
 
@@ -193,7 +194,11 @@ async fn main() -> anyhow::Result<()> {
     let secret = keccak256([funder.to_bytes().as_slice(), b"exp-frames/59/", run.as_bytes()].concat());
     let mut rng = StdRng::from_seed(keccak256([secret.as_slice(), b"committee"].concat()).0);
     let committee = Committee::dkg(&mut rng, ISSUERS)?;
-    let account = BlindAccount { public: *committee.sharing.public(), salt: keccak256([b"exp-frames/59/account/".as_slice(), run.as_bytes()].concat()) };
+    let code = match env::var("CODE_HEX") {
+        Ok(path) => Some(alloy::hex::decode(fs::read_to_string(path)?.trim())?),
+        Err(_) => None,
+    };
+    let account = BlindAccount { public: *committee.sharing.public(), salt: keccak256([b"exp-frames/59/account/".as_slice(), run.as_bytes()].concat()), code };
     let mut r = Run { provider, chain_id, funder, secret, account, committee, ledgers: BTreeMap::new(), seen: vec![], record: vec![] };
     println!("chain {chain_id}, run {run}, blind account {}, {} bytes of code with its key", r.address(), r.account.initcode().len());
 
@@ -259,20 +264,16 @@ async fn main() -> anyhow::Result<()> {
     let fees = r.fees().await?;
     let tx1 = r.payout(&[t1], r.key("to/d1").address(), &b1, fees)?;
     let tx2 = r.payout(&[t2], r.key("to/d2").address(), &b2, fees)?;
-    let s1 = rpc::send(&r.provider, &tx1).await.map_err(|e| e.to_string());
+    // The pool admits one pending transaction per sender: the second is sent while the first is
+    // pending, then again once the first is mined.
+    let h1 = rpc::send(&r.provider, &tx1).await?;
     let s2 = rpc::send(&r.provider, &tx2).await.map_err(|e| e.to_string());
-    println!("(d) sent: {s1:?} / {s2:?}");
-    tokio::time::sleep(Duration::from_secs(40)).await;
-    let r1 = rpc::receipt(&r.provider, tx1.hash()).await?;
-    let r2 = rpc::receipt(&r.provider, tx2.hash()).await?;
+    println!("(d) the second while the first is pending: {s2:?}");
+    let rc1 = rpc::wait_for_confirmed_receipt(&r.provider, h1, Duration::from_mins(2), Duration::from_secs(2)).await?;
+    r.note("d", json!({ "first": h1, "block": rc1.block_number, "frames": rc1.frame_receipts.iter().map(|f| f.status).collect::<Vec<_>>(), "secondWhilePending": format!("{s2:?}") })).await;
+    r.refused(&tx2, "d", "the second once the first is mined").await?;
     let (burned, minted) = r.count(D, e(2)).await?;
-    let sim2 = rpc::simulate(&r.provider, &tx2, "latest").await?;
-    r.note("d", json!({
-        "sent": [format!("{s1:?}"), format!("{s2:?}")],
-        "mined": [r1.as_ref().map(|x| x.block_number), r2.as_ref().map(|x| x.block_number)],
-        "burned": burned, "minted": minted,
-        "secondNowSimulates": { "valid": sim2.valid, "violation": sim2.violation },
-    })).await;
+    r.note("d", json!({ "burned": burned, "minted": minted })).await;
 
     // (e): recipients that refuse ether.
     r.buy(e(3), 2).await?;
@@ -321,7 +322,7 @@ async fn main() -> anyhow::Result<()> {
     r.note("f", json!({ "original": hash, "block": rc.block_number, "thiefBalance": r.provider.get_balance(thief.address()).await? })).await;
 
     // (g): aggregate payouts of 2, 4 and 8 tickets, one binder each.
-    for (k, n) in [(5u64, 2usize), (6, 4), (7, 8)] {
+    for (k, n) in [(5u64, 2usize), (6, 4), (7, 5)] {
         r.buy(e(k), n as u64).await?;
         let b = r.key(&format!("binder/g{n}"));
         let tickets = (0..n).map(|i| r.issue(e(k), b.address(), &format!("g{n}/{i}"), true)).collect::<anyhow::Result<Vec<_>>>()?;
@@ -330,6 +331,13 @@ async fn main() -> anyhow::Result<()> {
         let (burned, minted) = r.count(D, e(k)).await?;
         r.note("g", json!({ "n": n, "burned": burned, "minted": minted })).await;
     }
+
+    // Six tickets: past the prefix's state-gas cap.
+    r.buy(e(8), 6).await?;
+    let b = r.key("binder/g6");
+    let tickets = (0..6).map(|i| r.issue(e(8), b.address(), &format!("g6/{i}"), true)).collect::<anyhow::Result<Vec<_>>>()?;
+    let tx = r.payout(&tickets, r.key("to/g6").address(), &b, r.fees().await?)?;
+    r.refused(&tx, "g", "an aggregate payout of 6 tickets").await?;
 
     let out = json!({
         "chainId": chain_id,

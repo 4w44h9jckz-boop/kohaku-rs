@@ -42,8 +42,16 @@ pub const BUY: [u8; 4] = [0x21, 0x5a, 0xdc, 0x4a];
 pub const PAYOUT: [u8; 4] = [0x42, 0x3b, 0x21, 0xcd];
 /// `claim()`.
 pub const CLAIM: [u8; 4] = [0x4e, 0x71, 0xd9, 0x2d];
-/// The payout frame's execution budget: the account's `VERIFY` requires at least 60,000.
-pub const PAYOUT_EXECUTION: u64 = 90_000;
+/// The payout frame's execution budget: the account's `VERIFY` requires at least 100,000, and the
+/// payout holds 60,000 back from its call to the recipient.
+pub const PAYOUT_EXECUTION: u64 = 150_000;
+/// The payout frame's state budget: the count's slot, a credit's slot, and the recipient's account
+/// if it is new.
+pub const PAYOUT_STATE: u64 =
+    2 * kohaku_frame_kit::constants::STORAGE_SET_STATE_GAS + kohaku_frame_kit::constants::NEW_ACCOUNT_STATE_GAS;
+/// The most tickets one payout carries on the test network: each nonce key's first use costs
+/// 97,920 state gas in the validation prefix, which is capped at 500,000.
+pub const TESTNET_MAX_TICKETS: usize = 5;
 
 /// `BlindAccount.yul` compiled, before its key.
 ///
@@ -78,12 +86,14 @@ pub fn slot(key: B256, which: u8) -> B256 {
 pub struct BlindAccount {
     pub public: G2,
     pub salt: B256,
+    /// Creation code other than [`blind_account_code`], for a variant under test.
+    pub code: Option<Vec<u8>>,
 }
 
 impl BlindAccount {
     #[must_use]
     pub fn initcode(&self) -> Vec<u8> {
-        [blind_account_code(), g2_eip2537(&self.public).to_vec()].concat()
+        [self.code.clone().unwrap_or_else(blind_account_code), g2_eip2537(&self.public).to_vec()].concat()
     }
 
     #[must_use]
@@ -207,13 +217,16 @@ pub fn payout_tx(tickets: &[AccountTicket], to: Address, fees: Fees) -> Result<F
         nonce_seq: 0,
         sender: c.account,
         frames: vec![
+            // EIP-8250 charges each keyed nonce's first use, 97,920 state gas, to the frame that
+            // approves payment: here, this one.
             Frame::verify(approve::EXECUTION_AND_PAYMENT, None)
                 .with_data(verify)
-                .with_execution(110_000 + 25_000 * n as u64),
+                .with_execution(110_000 + 25_000 * n as u64)
+                .with_state(kohaku_frame_kit::constants::STORAGE_SET_STATE_GAS * n as u64),
             Frame::sender(Some(c.account))
                 .with_data(call)
                 .with_execution(PAYOUT_EXECUTION)
-                .with_state(2 * kohaku_frame_kit::constants::STORAGE_SET_STATE_GAS),
+                .with_state(PAYOUT_STATE),
         ],
         signatures: vec![crate::bound::binder_entry(c.binder)],
         fees,

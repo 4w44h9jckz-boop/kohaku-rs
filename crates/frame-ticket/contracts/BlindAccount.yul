@@ -8,7 +8,7 @@
 // claim()                                     0x4e71d92d  sends owed[caller]
 // payout(uint256 D, uint64 e, address to, n)  0x423b21cd  only from itself, in a SENDER frame:
 //   minted[chi] += n (reverting past burned[chi]); sends n * D - maxCost to `to` holding back
-//   20,000 gas, and credits owed[to] if the send fails.
+//   60,000 gas, and credits owed[to] if the send fails.
 //
 // VERIFY (frame 0, scope 3): the frame's data is
 //
@@ -19,7 +19,7 @@
 //   chain_id (32) || account (20) || D (32) || epoch (8) || serial (32) || binder (20)   144 bytes
 //
 // It checks: exactly two frames, the second a SENDER frame to this account with no value, an
-// execution budget of at least 60,000 and the data payout(D, epoch, to, n); 1 <= n <= 16 serials,
+// execution budget of at least 100,000 and the data payout(D, epoch, to, n); 1 <= n <= 16 serials,
 // non-zero and strictly increasing, which are the transaction's nonce keys (TXPARAM 0x0f, the keys'
 // hash) at sequence 0 (TXPARAM 0x01); the maximum cost (TXPARAM 0x06) below D; minted + n <= burned;
 // a SECP256K1 signature entry by binder over the signature hash; and the pairing
@@ -94,7 +94,7 @@ object "BlindAccount" {
                 if gt(minted, sload(slotOf(chi, 0))) { revert(0, 0) }
                 sstore(ms, minted)
                 let amount := sub(mul(n, d), txparam(0x06))
-                let sent := call(sub(gas(), 20000), to, amount, 0, 0, 0, 0)
+                let sent := call(sub(gas(), 60000), to, amount, 0, 0, 0, 0)
                 if iszero(sent) {
                     let os := slotOf(to, 2)
                     sstore(os, add(sload(os), amount))
@@ -107,45 +107,45 @@ object "BlindAccount" {
             }
 
             function validate(me) {
-                if me { fail() }
-                if iszero(eq(frameparam(0x06, me), 3)) { fail() }       // scope EXECUTION_AND_PAYMENT
-                if iszero(eq(txparam(0x09), 2)) { fail() }              // exactly two frames
+                if me { fail1() }
+                if iszero(eq(frameparam(0x06, me), 3)) { fail1() }       // scope EXECUTION_AND_PAYMENT
+                if iszero(eq(txparam(0x09), 2)) { fail1() }              // exactly two frames
                 let d := calldataload(0)
                 let epoch := shr(192, calldataload(32))
                 let binder := shr(96, calldataload(40))
                 let n := shr(248, calldataload(60))
-                if or(iszero(n), gt(n, 16)) { fail() }
-                if iszero(eq(calldatasize(), add(189, shl(5, n)))) { fail() }
-                if iszero(binder) { fail() }
-                if iszero(lt(txparam(0x06), d)) { fail() }               // maximum cost below D
+                if or(iszero(n), gt(n, 16)) { fail1() }
+                if iszero(eq(calldatasize(), add(189, shl(5, n)))) { fail1() }
+                if iszero(binder) { fail1() }
+                if iszero(lt(txparam(0x06), d)) { fail1() }               // maximum cost below D
 
                 // The second frame: SENDER to this account, no value, payout(D, epoch, to, n).
-                if iszero(eq(frameparam(0x02, 1), 2)) { fail() }
-                if iszero(eq(frameparam(0x00, 1), address())) { fail() }
-                if frameparam(0x08, 1) { fail() }
-                if lt(frameparam(0x01, 1), 60000) { fail() }
-                if iszero(eq(frameparam(0x04, 1), 132)) { fail() }
-                if iszero(eq(shr(224, framedataload(0, 1)), 0x423b21cd)) { fail() }
-                if iszero(eq(framedataload(4, 1), d)) { fail() }
-                if iszero(eq(framedataload(36, 1), epoch)) { fail() }
-                if iszero(eq(framedataload(100, 1), n)) { fail() }
+                if iszero(eq(frameparam(0x02, 1), 2)) { fail1() }
+                if iszero(eq(frameparam(0x00, 1), address())) { fail1() }
+                if frameparam(0x08, 1) { fail1() }
+                if lt(frameparam(0x01, 1), 100000) { fail1() }
+                if iszero(eq(frameparam(0x04, 1), 132)) { fail1() }
+                if iszero(eq(shr(224, framedataload(0, 1)), 0x423b21cd)) { fail1() }
+                if iszero(eq(framedataload(4, 1), d)) { fail1() }
+                if iszero(eq(framedataload(36, 1), epoch)) { fail1() }
+                if iszero(eq(framedataload(100, 1), n)) { fail1() }
 
                 // The serials are the nonce keys, at sequence 0: keccak256(n || serials) is the
                 // keys' hash. Strictly increasing and non-zero, as EIP-8250 requires of keys.
-                if txparam(0x01) { fail() }
+                if txparam(0x01) { fail2() }
                 mstore(0x1000, n)
                 let prev := 0
                 for { let i := 0 } lt(i, n) { i := add(i, 1) } {
                     let s := calldataload(add(61, shl(5, i)))
-                    if iszero(gt(s, prev)) { fail() }
+                    if iszero(gt(s, prev)) { fail2() }
                     prev := s
                     mstore(add(0x1020, shl(5, i)), s)
                 }
-                if iszero(eq(keccak256(0x1000, add(32, shl(5, n))), txparam(0x0f))) { fail() }
+                if iszero(eq(keccak256(0x1000, add(32, shl(5, n))), txparam(0x0f))) { fail2() }
 
                 // The count, read at admission and again at inclusion.
                 let chi := chiOf(d, epoch)
-                if gt(add(sload(slotOf(chi, 1)), n), sload(slotOf(chi, 0))) { fail() }
+                if gt(add(sload(slotOf(chi, 1)), n), sload(slotOf(chi, 0))) { fail3() }
 
                 // The binding: an entry the protocol verified over the sig hash, by the binder.
                 let bound := 0
@@ -157,14 +157,14 @@ object "BlindAccount" {
                         }
                     }
                 }
-                if iszero(bound) { fail() }
+                if iszero(bound) { fail4() }
 
                 // sum_i H(m_i) at 0xc00, each H(m_i) through 0xc80.
                 for { let i := 0 } lt(i, n) { i := add(i, 1) } {
                     hashToG1(d, epoch, calldataload(add(61, shl(5, i))), binder)
                     switch i
                     case 0 { mcopy(0xc00, 0xc80, 128) }
-                    default { if iszero(staticcall(gas(), 0x0b, 0xc00, 256, 0xc00, 128)) { fail() } }
+                    default { if iszero(staticcall(gas(), 0x0b, 0xc00, 256, 0xc00, 128)) { fail5() } }
                 }
 
                 // e(sigma, -g2) e(sum Q, PK) = 1
@@ -172,8 +172,8 @@ object "BlindAccount" {
                 datacopy(0x980, dataoffset("negG2"), 256)
                 mcopy(0xa80, 0xc00, 128)
                 codecopy(0xb00, sub(codesize(), 256), 256)
-                if iszero(staticcall(gas(), 0x0f, 0x900, 0x300, 0x00, 0x20)) { fail() }
-                if iszero(eq(mload(0x00), 1)) { fail() }
+                if iszero(staticcall(gas(), 0x0f, 0x900, 0x300, 0x00, 0x20)) { fail5() }
+                if iszero(eq(mload(0x00), 1)) { fail5() }
                 approve(3)
             }
 
@@ -233,6 +233,13 @@ object "BlindAccount" {
             }
 
             function fail() { revert(0, 0) }
+            // One per group of VERIFY's checks: the shape, the nonce keys, the count, the binding,
+            // the pairing. Each reverts.
+            function fail1() { revert(0, 0) }
+            function fail2() { revert(0, 0) }
+            function fail3() { revert(0, 0) }
+            function fail4() { revert(0, 0) }
+            function fail5() { revert(0, 0) }
             // "BLIND_ACCOUNT_V1", left-aligned.
             function NAMESPACE() -> v { v := 0x424c494e445f4143434f554e545f563100000000000000000000000000000000 }
             // "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_" || I2OSP(43, 1), left-aligned.
