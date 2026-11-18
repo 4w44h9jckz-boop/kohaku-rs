@@ -15,6 +15,7 @@
 //! - [`bound`]: a ticket bound to its transaction through a one-time key (experiment 48).
 
 pub mod blind;
+pub mod blind_account;
 pub mod bound;
 pub mod issuers;
 pub mod paymaster;

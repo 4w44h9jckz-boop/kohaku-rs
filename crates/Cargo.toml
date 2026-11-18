@@ -8,6 +8,7 @@ members = [
     "frame-enclave",
     "frame-display",
     "frame-exit",
+    "frame-intent",
     "frame-kit",
     "frame-pool",
     "frame-registry",

@@ -235,14 +235,18 @@ impl CheckedReader {
             Ok(lower) => {
                 let nodes: Nodes = self.top.iter().chain(&lower).collect();
                 match trie::account(self.header.state_root, address, &nodes) {
-                    Ok(Some(st)) if st.is(&found.value) => {
+                    // An account the branch proves absent reads as empty (EIP-161).
+                    Ok(st) if trie::settles(st.as_ref(), &found.value) => {
                         return Ok(Checked::Proven {
                             value: found.value,
                             slot: found.slot,
                         });
                     }
                     Ok(Some(_)) => "the branch proves another account".to_owned(),
-                    Ok(None) => "the branch proves the account absent".to_owned(),
+                    Ok(None) => {
+                        "the branch proves the account absent, and the record claims more than an empty account"
+                            .to_owned()
+                    }
                     Err(e) => format!("the branch does not reach the header's state root: {e}"),
                 }
             }
