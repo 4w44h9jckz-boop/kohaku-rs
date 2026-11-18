@@ -1,0 +1,21 @@
+[package]
+name = "kohaku-frame-intent"
+version = "0.1.0"
+edition = "2024"
+description = "An exact list of a frame transaction's writes, compared with an intent picked from templates (exp-frames experiment 58)"
+
+[[bin]]
+name = "write-check"
+path = "src/bin/write-check.rs"
+
+[dependencies]
+alloy = { workspace = true, features = ["providers", "provider-http", "rpc-types", "signers", "signer-local"] }
+anyhow = { workspace = true }
+kohaku-frame-kit = { path = "../frame-kit" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

@@ -5061,6 +5061,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kohaku-frame-intent"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "kohaku-frame-kit",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "kohaku-frame-kit"
 version = "0.1.0"
 dependencies = [
